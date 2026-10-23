@@ -30,6 +30,7 @@ local cronJob = (import 'libs.libsonnet').k.batch.v1.cronJob;
     + (if podAnnotations != {} then cronJob.spec.jobTemplate.spec.template.metadata.withAnnotations(podAnnotations) else {})
     + cronJob.spec.jobTemplate.spec.template.metadata.withLabels(h.workloadLabels(cfg, job, 'scheduled-job', name))
     + (if placement.nodeSelector != {} then cronJob.spec.jobTemplate.spec.template.spec.withNodeSelector(placement.nodeSelector) else {})
+    + (if cfg.mysql.enabled then { spec+: { jobTemplate+: { spec+: { template+: { spec+: { initContainers: [h.mysqlProxyContainer(cfg, nativeSidecar=true)] } } } } } } else {})
     // Each attempt is its own pod, so a failed run keeps its logs.
     + cronJob.spec.jobTemplate.spec.template.spec.withRestartPolicy('Never')
     + cronJob.spec.jobTemplate.spec.template.spec.withServiceAccountName('app')

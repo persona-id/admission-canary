@@ -32,7 +32,70 @@ local sizes = {
   // every workload runs as.
   appPrincipal(cfg):: 'cluster.local/ns/%s/sa/app' % cfg.namespace,
 
-  // A `gcsStorageBuckets` entry's bucket name, shared by its StorageBucket and IAMPolicy.
+  // Cloud IAM service account IDs are limited to 30 characters. Keep both ends
+  // when truncating so environment/user suffixes remain distinct. Enabled MySQL
+  // namespaces are at most 35 characters, so the untruncated form is the one
+  // the staging admission policy allows.
+  mysqlAccountId(cfg)::
+    local namespacePrefix = 'frontier-';
+    local accountPrefix = 'app-';
+    local app = if std.startsWith(cfg.namespace, namespacePrefix) then std.substr(cfg.namespace, std.length(namespacePrefix), std.length(cfg.namespace)) else cfg.namespace;
+    if std.length(app) <= 26 then accountPrefix + app
+    else '%s%s-%s' % [accountPrefix, std.substr(app, 0, 17), std.substr(app, std.length(app) - 8, 8)],
+
+  mysqlProxyContainer(cfg, nativeSidecar=false)::
+    {
+      name: 'cloud-sql-proxy',
+      image: cfg.mysql.proxy.image,
+      args: [
+        '--auto-iam-authn',
+        '--health-check',
+        '--http-address=0.0.0.0',
+        '--http-port=9091',
+        '--private-ip',
+        '--structured-logs',
+        '--port=%d' % cfg.mysql.proxy.port,
+        '$(INSTANCE_CONNECTION_NAME)',
+      ],
+      env: [{
+        name: 'INSTANCE_CONNECTION_NAME',
+        valueFrom: {
+          configMapKeyRef: {
+            key: 'instanceConnectionName',
+            name: 'mysql-connection',
+          },
+        },
+      }],
+      resources: {
+        limits: { cpu: '160m', memory: '64Mi' },
+        requests: { cpu: '100m', memory: '32Mi' },
+      },
+      securityContext: {
+        allowPrivilegeEscalation: false,
+        runAsNonRoot: true,
+      },
+    }
+    // Knative rejects probes on a sidecar unless multi-container probing is on.
+    // A native sidecar's startup probe holds the main container until the proxy is up.
+    + (if nativeSidecar then {
+         livenessProbe: {
+           httpGet: { path: '/liveness', port: 9091 },
+           periodSeconds: 10,
+           timeoutSeconds: 5,
+         },
+         restartPolicy: 'Always',
+         startupProbe: {
+           failureThreshold: 30,
+           httpGet: { path: '/startup', port: 9091 },
+           periodSeconds: 1,
+           timeoutSeconds: 5,
+         },
+       } else {}),
+
+  // A `gcsStorageBuckets` entry's role for the app.
+  bucketAppRole(item):: $.get(item, 'appPermissions', 'roles/storage.objectUser'),
+
+  // A `gcsStorageBuckets` entry's bucket name, shared by its StorageBucket and IAMPartialPolicy.
   bucketName(item):: 'persona-frontier-%s' % $.normalize(item.name),
 
   // Every env var a workload gets, in precedence order — later entries win.
@@ -55,6 +118,18 @@ local sizes = {
     + (if cfg.mongo.enabled then [
          envVar.fromSecretRef('MONGODB_URI', 'mongo-credentials', 'connectionStringPrivateSrv'),
          envVar.fromSecretRef('MONGODB_DB_NAME', 'mongo-credentials', 'username'),
+       ] else [])
+    + (if cfg.mysql.enabled then [
+         {
+           name: 'MYSQL_DATABASE',
+           valueFrom: { configMapKeyRef: { key: 'database', name: 'mysql-connection' } },
+         },
+         envVar.new('MYSQL_HOST', '127.0.0.1'),
+         envVar.new('MYSQL_PORT', std.toString(cfg.mysql.proxy.port)),
+         {
+           name: 'MYSQL_USER',
+           valueFrom: { configMapKeyRef: { key: 'user', name: 'mysql-connection' } },
+         },
        ] else [])
     + (if $.get(cfg.source, 'revision', '') != '' then [envVar.new('DD_GIT_COMMIT_SHA', std.toString(cfg.source.revision))] else [])
     + (if $.get(cfg.source, 'repository', '') != '' then [envVar.new('DD_GIT_REPOSITORY_URL', std.toString(cfg.source.repository))] else [])
@@ -222,8 +297,9 @@ local sizes = {
   // instances of the same shape with different configs. Keyed by the output field
   // each renders under; only enabled instances are present.
   //
-  // Each is { conf, image, name, resources, storage, strategy }, where `storage` is
-  // { size, storageClass }, or null for an emptyDir.
+  // Each is { computeClass, conf, image, name, priorityClassName, resources,
+  // storage, strategy }, where `storage` is { claimName, size, storageClass }, or
+  // null for an emptyDir.
   valkeyInstances(cfg)::
     local baseConfig = |||
       port %d
@@ -235,9 +311,11 @@ local sizes = {
     ||| % $.valkeyPort;
     local cache = cfg.valkey;
     local queue = cfg.jobQueue;
+    local queueClass = $.get(queue, 'computeClass', '');
     {
       // The job queue. Its address is redis://job-queue:6379.
       [if queue.enabled then 'jobQueue']: {
+        computeClass: queueClass,
         conf: baseConfig + |||
           # Every job reaches disk as it arrives. This is the whole reason the queue
           # is a separate instance from the `valkey` cache.
@@ -250,8 +328,15 @@ local sizes = {
         ||| % queue.maxMemory,
         image: queue.image,
         name: 'job-queue',
+        priorityClassName: $.get(queue, 'priorityClassName', ''),
         resources: queue.resources,
-        storage: { size: queue.diskSize, storageClass: queue.storageClass },
+        // A compute class's nodes only attach Hyperdisk. A claim's storage class
+        // can't change, so the Hyperdisk claim gets its own name, as in the chart.
+        storage: {
+          claimName: if queueClass != '' then 'job-queue-hyperdisk' else 'job-queue',
+          size: queue.diskSize,
+          storageClass: $.get(queue, 'storageClass', if queueClass != '' then 'hyperdisk-balanced-rwo' else ''),
+        },
         // The disk is ReadWriteOnce, so two pods cannot attach it at once. A rolling
         // update would wait forever for a second pod that can never start.
         strategy: 'Recreate',
@@ -259,13 +344,15 @@ local sizes = {
 
       // The cache. Its address is redis://valkey:6379.
       [if cache.enabled then 'valkey']: {
+        computeClass: '',
         conf: baseConfig + cache.valkeyConfig,
         image: cache.image,
         name: 'valkey',
+        priorityClassName: '',
         resources: cache.resources,
         storage:
           if cache.dataStorage.enabled
-          then { size: cache.dataStorage.requestedSize, storageClass: cache.dataStorage.storageClass }
+          then { claimName: 'valkey', size: cache.dataStorage.requestedSize, storageClass: cache.dataStorage.storageClass }
           else null,
         strategy: cache.deploymentStrategy,
       },

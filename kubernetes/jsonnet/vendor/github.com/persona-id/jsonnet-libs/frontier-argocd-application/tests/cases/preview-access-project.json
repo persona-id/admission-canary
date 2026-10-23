@@ -1,0 +1,56 @@
+{
+   "apiVersion": "argoproj.io/v1alpha1",
+   "kind": "AppProject",
+   "metadata": {
+      "name": "preview-access-frontier-my-app",
+      "namespace": "argocd"
+   },
+   "spec": {
+      "clusterResourceWhitelist": [
+         {
+            "group": "",
+            "kind": "Namespace"
+         }
+      ],
+      "description": "Dev Secrets and buckets for the pull request preview environments of Frontier app my-app, registered in frontier-app-registry",
+      "destinations": [
+         {
+            "namespace": "frontier-my-app-dev",
+            "server": "https://kubernetes.default.svc"
+         },
+         {
+            "namespace": "frontier-my-app-dev-pr-*",
+            "server": "https://kubernetes.default.svc"
+         }
+      ],
+      "namespaceResourceWhitelist": [
+         {
+            "group": "",
+            "kind": "ServiceAccount"
+         },
+         {
+            "group": "external-secrets.io",
+            "kind": "ExternalSecret"
+         },
+         {
+            "group": "external-secrets.io",
+            "kind": "SecretStore"
+         },
+         {
+            "group": "iam.cnrm.cloud.google.com",
+            "kind": "IAMPolicyMember"
+         },
+         {
+            "group": "rbac.authorization.k8s.io",
+            "kind": "Role"
+         },
+         {
+            "group": "rbac.authorization.k8s.io",
+            "kind": "RoleBinding"
+         }
+      ],
+      "sourceRepos": [
+         "https://github.com/persona-id/my-app"
+      ]
+   }
+}

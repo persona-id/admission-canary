@@ -59,8 +59,9 @@
   //   frontierApps: namespaces of Frontier apps that may call these paths, e.g.
   //           `frontier-some-app-prod`.
   //   principals: other callers. `forge/<forge-app>` is one named Forge
-  //           (Cloudflare Worker) app, named `<repo>-prod`, e.g.
-  //           `forge/persona-cf-app-oracle-prod`, proven by its signed token.
+  //           (Cloudflare Worker) app, proven by its signed pass. Forge's deploy
+  //           sets the name: `<repo>` in staging, `<repo>-prod` in production;
+  //           Oracle has one environment and is `forge/persona-cf-app-oracle`.
   //           Anything else is a full `spiffe://` identity, e.g. a workload in
   //           another cluster.
   //   Callers must use http://app.<this-namespace>.svc.cluster.local; a call
@@ -69,7 +70,7 @@
   //   reaches only the routes that name it; `humans` rules never admit one.
   //
   //   [
-  //     { paths: ['/api/internal/*'], humans: 'none', frontierApps: ['frontier-some-app-prod'], principals: ['forge/persona-cf-app-oracle-prod'] },
+  //     { paths: ['/api/internal/*'], humans: 'none', frontierApps: ['frontier-some-app-prod'], principals: ['forge/persona-cf-app-oracle'] },
   //     { paths: ['/*'], humans: 'okta', groups: ['Role-Engineering'] },
   //   ]
   //
@@ -201,7 +202,8 @@
   // `kubernetes.podspec-tolerations: enabled` in the `config-features` ConfigMap.
   //
   // The Valkey instances deliberately get neither the nodeSelector nor the
-  // toleration, because they own a disk — see lib/deployment.libsonnet.
+  // toleration, because they own a disk — see lib/deployment.libsonnet. The job
+  // queue takes its own, `jobQueue.computeClass`.
   computeClass: 'standard',
 
   // Additional pod tolerations. The toleration for the `computeClass` taint is
@@ -225,9 +227,11 @@
   env: [],
 
   // Google Cloud Storage buckets to create for the app, managed with GCP Config
-  // Connector. Each bucket gets an authoritative IAMPolicy: every permission on the
-  // bucket must be assigned here, and changes made in the console are reverted.
-  // App access is granted to the `app` ServiceAccount via workload identity.
+  // Connector. Each bucket gets an IAMPartialPolicy: the members listed here are kept
+  // in their roles, and members granted anywhere else, such as a preview
+  // environment's or the console's, are left alone rather than removed.
+  // App access is granted to the `app` ServiceAccount via workload identity. `preview`
+  // only grants appPermissions of roles/storage.objectViewer, objectCreator or objectUser.
   // https://docs.cloud.google.com/config-connector/docs/reference/resource-docs/storage/storagebucket
   //
   // Each entry takes:
@@ -301,6 +305,18 @@
     diskSize: '8Gi',
     storageClass: '',
 
+    // Optional: a compute class to run the queue on, such as `standard`. Separate
+    // from the app's `computeClass`, which the queue never takes. The class's nodes
+    // are reservation-backed but only attach Hyperdisk, so the disk becomes Hyperdisk
+    // Balanced (`hyperdisk-balanced-rwo`, unless storageClass says otherwise) and its
+    // claim is named `job-queue-hyperdisk` instead of `job-queue`: a claim's storage
+    // class can't change. Empty keeps the queue on the untainted pool, which a GCE
+    // stock-out can leave with no room.
+    //
+    // Setting or clearing it moves the queue to a new, empty disk and Argo CD prunes
+    // the old claim, so let the queue drain first.
+    computeClass: '',
+
     // Refuses writes past this, rather than evicting jobs.
     maxMemory: '512mb',
 
@@ -310,17 +326,66 @@
       limits: { memory: '1Gi' },
     },
 
+    // Optional: a PriorityClass for the queue's pod, such as `product-feature`. Above
+    // the default 0, a Pending queue can preempt default-priority pods to fit, and
+    // they can no longer preempt it. Higher classes (infrastructure-*) still can.
+    // Empty keeps the cluster default.
+    priorityClassName: '',
+
     image: {
       repository: 'docker.io/valkey/valkey',
       tag: '9.0.2',
     },
   },
 
-  // Mongo database on the shared Frontier Atlas cluster. When enabled, provisions a
-  // database named after `appName` and injects MONGODB_URI and MONGODB_DB_NAME into
-  // the container.
+  // Mongo database on the shared Frontier Atlas cluster. Opt in to provision a
+  // database named after `appName` and inject MONGODB_URI and MONGODB_DB_NAME.
   mongo: {
     enabled: false,
+  },
+
+  // MySQL database on a dedicated Frontier Cloud SQL instance. Opt in separately
+  // in dev and prod to provision one instance for that app environment. The proxy uses
+  // Workload Identity and automatic IAM database authentication; no database
+  // password is exposed to the app namespace.
+  mysql: {
+    enabled: false,
+    // Project containing the Cloud SQL instance and generated app service account.
+    // Required when enabled.
+    projectId: '',
+    region: 'us-central1',
+    // Empty selects this project's default VPC. Set a full network resource name
+    // when the instance should use another VPC.
+    privateNetwork: '',
+    instance: {
+      // environment-default selects zonal for dev and regional HA for prod.
+      // The concrete zonal and regional-ha profiles can also be selected explicitly.
+      profile: 'environment-default',
+    },
+
+    // mysql client used to generate the provisioner password and grant the app user.
+    client: {
+      image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b',
+    },
+
+    // Used only to create the bootstrap Secret through the Kubernetes API.
+    secretGenerator: {
+      image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/curlimages/curl@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6',
+    },
+
+    proxy: {
+      image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28',
+      port: 3306,
+    },
+
+    // Runs before an Argo CD rollout. Use for Rails-style schema migrations.
+    migration: {
+      enabled: false,
+      command: [],
+      args: [],
+      activeDeadlineSeconds: 900,
+      backoffLimit: 1,
+    },
   },
 
   // Scaling configuration.

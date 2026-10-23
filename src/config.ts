@@ -19,7 +19,7 @@ export interface AppConfig {
   githubOrg: string;
 }
 
-export const DEFAULT_APP_NAME = 'persona-template-frontier-app';
+export const DEFAULT_APP_NAME = 'admission-canary';
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

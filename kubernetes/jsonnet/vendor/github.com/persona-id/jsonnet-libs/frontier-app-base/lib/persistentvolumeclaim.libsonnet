@@ -5,7 +5,7 @@ local pvc = (import 'libs.libsonnet').k.core.v1.persistentVolumeClaim;
 {
   valkey(cfg, instance)::
     local storage = instance.storage;
-    pvc.new(instance.name)
+    pvc.new(storage.claimName)
     + pvc.metadata.withLabels(h.valkeyLabels(cfg, instance))
     + pvc.spec.resources.withRequests({ storage: storage.size })
     + pvc.spec.withAccessModes(['ReadWriteOnce'])

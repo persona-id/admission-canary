@@ -1,0 +1,12 @@
+{
+   "apiVersion": "v1",
+   "data": {
+      "development": "ZONAL",
+      "production": "REGIONAL",
+      "productionZonalOverride": "ZONAL"
+   },
+   "kind": "ConfigMap",
+   "metadata": {
+      "name": "mysql-environment-profiles-test"
+   }
+}

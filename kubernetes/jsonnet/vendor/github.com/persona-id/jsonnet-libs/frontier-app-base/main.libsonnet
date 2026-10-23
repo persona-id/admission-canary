@@ -20,10 +20,13 @@ local configMap = import 'lib/configmap.libsonnet';
 local cronJob = import 'lib/cronjob.libsonnet';
 local deployment = import 'lib/deployment.libsonnet';
 local domainMapping = import 'lib/domainmapping.libsonnet';
+local frontierPreview = import 'lib/frontierpreview.libsonnet';
 local h = import 'lib/helpers.libsonnet';
 local iamPolicy = import 'lib/iampolicy.libsonnet';
+local job = import 'lib/job.libsonnet';
 local knativeService = import 'lib/knativeservice.libsonnet';
 local mongoDatabase = import 'lib/mongodatabase.libsonnet';
+local mysqlDatabase = import 'lib/mysqldatabase.libsonnet';
 local namespace = import 'lib/namespace.libsonnet';
 local onePasswordItem = import 'lib/onepassworditem.libsonnet';
 local peerAuthentication = import 'lib/peerauthentication.libsonnet';
@@ -65,6 +68,13 @@ local valkey(cfg, instance) = {
     local oktaAllowlist = h.oktaAllowlist(cfg);
     local instances = h.valkeyInstances(cfg);
     local forgeUsed = std.any([std.startsWith(p, 'forge/') for r in h.routes(cfg) for p in r.principals]);
+    local migrate = cfg.mysql.enabled && cfg.mysql.migration.enabled;
+    // The grant runs in wave 0. A migration follows in wave 1; otherwise app
+    // workloads can start in wave 1 as soon as the grant has succeeded.
+    local afterMysqlSetup =
+      if cfg.mysql.enabled
+      then { metadata+: { annotations+: { 'argocd.argoproj.io/sync-wave': if migrate then '2' else '1' } } }
+      else {};
 
     validation(cfg) + {
       _config:: cfg,
@@ -89,6 +99,8 @@ local valkey(cfg, instance) = {
       },
 
       [if cfg.mongo.enabled then 'mongoDatabase']: mongoDatabase.app(cfg),
+      [if cfg.mysql.enabled then 'mysqlDatabase']: mysqlDatabase.app(cfg),
+      [if migrate then 'mysqlMigration']: job.mysqlMigration(cfg),
 
       namespace: namespace.app(cfg),
 
@@ -100,7 +112,7 @@ local valkey(cfg, instance) = {
 
       // Keyed by normalized name.
       [if bg.enabled then 'scheduledJobs']: {
-        [h.normalize(h.get(job, 'name', ''))]: cronJob.scheduled(cfg, job)
+        [h.normalize(h.get(job, 'name', ''))]: cronJob.scheduled(cfg, job) + afterMysqlSetup
         for job in bg.scheduled
       },
 
@@ -133,7 +145,7 @@ local valkey(cfg, instance) = {
       peerAuthentication: peerAuthentication.app(cfg),
 
       // The web service.
-      service: knativeService.app(cfg),
+      service: knativeService.app(cfg) + afterMysqlSetup,
       serviceAccount: serviceAccount.app(cfg),
 
       // Only when a route names a Forge app.
@@ -145,13 +157,78 @@ local valkey(cfg, instance) = {
 
       // Keyed by normalized name.
       [if bg.enabled then 'workers']: {
-        [h.normalize(h.get(worker, 'name', ''))]: deployment.worker(cfg, worker)
+        [h.normalize(h.get(worker, 'name', ''))]: deployment.worker(cfg, worker) + afterMysqlSetup
         for worker in bg.workers
       },
     } + {
       // `valkey` and `jobQueue`, each with the objects in `valkey` above.
       [name]: valkey(cfg, instances[name])
       for name in std.objectFields(instances)
+    },
+
+  // Renders pull request `prNumber`'s preview environment from the app's merged
+  // development `config`, into <dev namespace>-pr-<prNumber>, against the dev app's
+  // Secrets, Mongo database and buckets, which persona-kubernetes shares with it as its
+  // FrontierPreview asks; see the README. MySQL stays off: its database user is the
+  // dev namespace's workload identity, which a preview cannot assume, so a preview
+  // must not provision a database or run a migration of its own. `prNumber` may be a
+  // string, as an Argo CD top-level argument is.
+  preview(config, prNumber)::
+    local pr = std.toString(prNumber);
+    assert pr != '' && pr[0] != '0' && std.all([std.member('0123456789', c) for c in std.stringChars(pr)]) :
+           'prNumber must be a positive integer, got "%s"' % pr;
+    local dev = std.mergePatch(defaults, config);
+    assert std.endsWith(dev.namespace, '-dev') :
+           'a preview is rendered from the development config, whose namespace ends in -dev; got "%s"' % dev.namespace;
+    local suffix = '-pr-' + pr;
+    local ns = dev.namespace + suffix;
+    // Knative names the host app-<namespace>, and a DNS label is at most 63 characters.
+    assert std.length('app-' + ns) <= 63 :
+           "the preview hostname label app-%s is %d characters, over DNS's 63; the app name is too long for previews"
+           % [ns, std.length('app-' + ns)];
+
+    // Points URLs the app builds from its own dev hostname, such as OAuth callbacks, at the preview's.
+    local devHost = 'app-%s.' % dev.namespace;
+    local previewHost = 'app-%s.' % ns;
+    local retarget(env) = [
+      e + (if std.isString(std.get(e, 'value')) then { value: std.strReplace(e.value, devHost, previewHost) } else {})
+      for e in env
+    ];
+    local bg = dev.backgroundJobs;
+    local cfg = std.mergePatch(dev, {
+      appName: dev.appName + suffix,
+      backgroundJobs: {
+        scheduled: [job { env: retarget(h.get(job, 'env', [])), suspend: true } for job in bg.scheduled],
+        workers: [worker { env: retarget(h.get(worker, 'env', [])) } for worker in bg.workers],
+      },
+      env: retarget(dev.env) + [
+        { name: 'FRONTIER_PREVIEW', value: 'true' },
+        { name: 'FRONTIER_PREVIEW_PR', value: pr },
+      ],
+      // A GCP service account binds the dev namespace's `app` only; the preview reaches
+      // the dev buckets as its own workload identity instead. MySQL is off for the
+      // same reason: the dev database user is that service account, not a copied secret.
+      gcpServiceAccount: { enabled: false },
+      mysql: { enabled: false, migration: { enabled: false } },
+      homestead: { catalog: 'dev' },
+      namespace: ns,
+      releaseName: h.releaseName(dev) + suffix,
+    });
+
+    $.new(cfg) + {
+      domainMappings:: {},
+      frontierPreview: frontierPreview.app(cfg),
+      // Keyed by the bucket's `name` as configured. The buckets are the dev app's.
+      gcsStorageBuckets: {
+        [item.name]: { iamPolicyMember: iamPolicy.previewBucket(cfg, dev.namespace, item) }
+        for item in cfg.gcsStorageBuckets
+      },
+      mongoDatabase:: {},
+      mysqlDatabase:: {},
+      mysqlMigration:: {},
+      namespace+: { metadata+: { labels+: { 'frontier.withpersona.com/preview': 'true' } } },
+      onePasswordItems:: {},
+      sealedSecrets:: {},
     },
 
   // Flattens what `new` returns into a plain list of Kubernetes objects, for

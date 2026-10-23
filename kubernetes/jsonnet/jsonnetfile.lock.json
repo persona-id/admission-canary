@@ -48,7 +48,7 @@
           "subdir": "1.34"
         }
       },
-      "version": "18e7a26f0699cb8b006494f40b93ddd06d33b299",
+      "version": "f66023fcddc92e89c3e81bd49c1f528a984505ef",
       "sum": "E17cbu3ZmqX9ILxumK2jmu8KlUijg/DME3LaOcPxaX0="
     },
     {
@@ -68,8 +68,8 @@
           "subdir": "frontier-app-base"
         }
       },
-      "version": "6a1cd8db3bb297e89d21de20dc50d516985ea3d2",
-      "sum": "UuK08RdyJElffmutOq1rsaAgEVyLgc7aakqAtPfP0K4="
+      "version": "1fa05215dab383ae1af9fa85e454551c2e75a7c2",
+      "sum": "B5pGsMMXnbeRaG6Sf95cNepp/Zd5Nr+Y1QNjXIyEb8g="
     },
     {
       "source": {
@@ -78,8 +78,8 @@
           "subdir": "frontier-argocd-application"
         }
       },
-      "version": "fa22601b4d770e58bdcde8d26e3c7753669927c8",
-      "sum": "nqtaWGgy10dMnx5uMAbDyfCF18Xy5QHJMZnXa5ryFC8="
+      "version": "b59e2434fef0f86ecfab3a05618e1648253673b0",
+      "sum": "/oR2X/8Kuw9DhSgVzMKVbNceOJhmGvJm+9zWzw1POA0="
     }
   ],
   "legacyImports": false

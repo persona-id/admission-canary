@@ -236,7 +236,7 @@
    },
    {
       "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
-      "kind": "IAMPolicy",
+      "kind": "IAMPartialPolicy",
       "metadata": {
          "labels": {
             "app.kubernetes.io/instance": "rel",
@@ -249,14 +249,20 @@
          "bindings": [
             {
                "members": [
-                  "user:bar@example.com"
+                  {
+                     "member": "user:bar@example.com"
+                  }
                ],
                "role": "roles/storage.objectAdmin"
             },
             {
                "members": [
-                  "user:foo@example.com",
-                  "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/demo-prod/sa/app"
+                  {
+                     "member": "user:foo@example.com"
+                  },
+                  {
+                     "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/demo-prod/sa/app"
+                  }
                ],
                "role": "roles/storage.objectUser"
             }
@@ -293,7 +299,7 @@
    },
    {
       "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
-      "kind": "IAMPolicy",
+      "kind": "IAMPartialPolicy",
       "metadata": {
          "labels": {
             "app.kubernetes.io/instance": "rel",
@@ -306,7 +312,9 @@
          "bindings": [
             {
                "members": [
-                  "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/demo-prod/sa/app"
+                  {
+                     "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/demo-prod/sa/app"
+                  }
                ],
                "role": "roles/storage.objectViewer"
             }

@@ -29,4 +29,10 @@ local common = import '../common/config.libsonnet';
   image: {
     repository: app.imageRepository,
   },
+
+  mysql: {
+    enabled: true,
+    projectId: 'persona-frontier-staging',
+    instance: { profile: 'environment-default' },
+  },
 }

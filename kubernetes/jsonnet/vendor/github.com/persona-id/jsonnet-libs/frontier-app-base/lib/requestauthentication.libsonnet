@@ -16,6 +16,7 @@ local requestAuthentication = (import 'libs.libsonnet').istio.security.v1.reques
       + requestAuthentication.spec.jwtRules.withFromHeaders([{ name: 'x-forge-identity' }])
       + requestAuthentication.spec.jwtRules.withIssuer(cfg.forgeIdentity.issuer)
       + requestAuthentication.spec.jwtRules.withJwks(cfg.forgeIdentity.jwks)
+      // Envoy removes a caller-sent x-forge-caller and sets it only from a verified pass.
       + requestAuthentication.spec.jwtRules.withOutputClaimToHeaders([{ header: 'x-forge-caller', claim: 'sub' }]),
     ]),
 

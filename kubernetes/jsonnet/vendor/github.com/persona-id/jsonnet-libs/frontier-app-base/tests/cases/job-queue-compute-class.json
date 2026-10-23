@@ -1,0 +1,568 @@
+[
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "allow-intra-namespace"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "namespaces": [
+                           "demo-prod"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-s2s"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "paths": [
+                           "/metrics",
+                           "/healthz"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/knative-serving/sa/activator",
+                           "cluster.local/ns/knative-serving/sa/controller"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "job-queue-allow-app"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/demo-prod/sa/app"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "job-queue"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "data": {
+         "valkey.conf": "port 6379\n# No password. Protection is STRICT mTLS plus an AuthorizationPolicy\n# admitting only the `app` ServiceAccount.\nprotected-mode no\nbind * -::*\ndir /data\n# Every job reaches disk as it arrives. This is the whole reason the queue\n# is a separate instance from the `valkey` cache.\nappendonly yes\nappendfsync everysec\nmaxmemory 512mb\n# Refuse new work rather than deleting queued work when memory fills. The\n# cache does the opposite (allkeys-lru); one instance cannot do both.\nmaxmemory-policy noeviction\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue-config"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      },
+      "spec": {
+         "replicas": 1,
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/instance": "demo",
+               "app.kubernetes.io/name": "job-queue"
+            }
+         },
+         "strategy": {
+            "type": "Recreate"
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "checksum/config": "5cbb5ce163d38d6d"
+               },
+               "labels": {
+                  "app.kubernetes.io/instance": "demo",
+                  "app.kubernetes.io/name": "job-queue"
+               }
+            },
+            "spec": {
+               "automountServiceAccountToken": false,
+               "containers": [
+                  {
+                     "args": [
+                        "/etc/valkey/valkey.conf"
+                     ],
+                     "command": [
+                        "valkey-server"
+                     ],
+                     "image": "docker.io/valkey/valkey:9.0.2",
+                     "imagePullPolicy": "IfNotPresent",
+                     "livenessProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "name": "job-queue",
+                     "ports": [
+                        {
+                           "containerPort": 6379,
+                           "name": "tcp",
+                           "protocol": "TCP"
+                        }
+                     ],
+                     "resources": {
+                        "limits": {
+                           "memory": "1Gi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "512Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "capabilities": {
+                           "drop": [
+                              "ALL"
+                           ]
+                        },
+                        "readOnlyRootFilesystem": true
+                     },
+                     "startupProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/data",
+                           "name": "data"
+                        },
+                        {
+                           "mountPath": "/etc/valkey",
+                           "name": "config",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard"
+               },
+               "priorityClassName": "product-feature",
+               "securityContext": {
+                  "fsGroup": 1000,
+                  "runAsGroup": 1000,
+                  "runAsNonRoot": true,
+                  "runAsUser": 1000,
+                  "seccompProfile": {
+                     "type": "RuntimeDefault"
+                  }
+               },
+               "serviceAccountName": "job-queue",
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard"
+                  }
+               ],
+               "volumes": [
+                  {
+                     "name": "data",
+                     "persistentVolumeClaim": {
+                        "claimName": "job-queue-hyperdisk"
+                     }
+                  },
+                  {
+                     "configMap": {
+                        "name": "job-queue-config"
+                     },
+                     "name": "config"
+                  }
+               ]
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "job-queue-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "job-queue"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue-hyperdisk"
+      },
+      "spec": {
+         "accessModes": [
+            "ReadWriteOnce"
+         ],
+         "resources": {
+            "requests": {
+               "storage": "8Gi"
+            }
+         },
+         "storageClassName": "hyperdisk-balanced-rwo",
+         "volumeMode": "Filesystem"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "tcp",
+               "port": 6379,
+               "protocol": "TCP",
+               "targetPort": "tcp"
+            }
+         ],
+         "selector": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "type": "ClusterIP"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+         "labels": {
+            "app": "demo",
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "development",
+            "homestead.withpersona.com/catalog": "prod",
+            "istio.io/rev": "stable",
+            "name": "demo-prod"
+         },
+         "name": "demo-prod"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-crd-access"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-edit"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "serving.knative.dev/v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "knative.withpersona.com/visibility": "private"
+         },
+         "name": "app"
+      },
+      "spec": {
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "autoscaling.knative.dev/minScale": "1",
+                  "autoscaling.knative.dev/target-burst-capacity": "0"
+               },
+               "labels": {
+                  "environment": "production"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "env": [
+                        {
+                           "name": "JOB_QUEUE_URL",
+                           "value": "redis://job-queue:6379"
+                        },
+                        {
+                           "name": "REDIS_ADDR",
+                           "value": "job-queue:6379"
+                        }
+                     ],
+                     "image": "r:t",
+                     "ports": [
+                        {
+                           "containerPort": 8080
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard-highcpu"
+               },
+               "serviceAccountName": "app",
+               "timeoutSeconds": 300,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard-highcpu"
+                  },
+                  {
+                     "effect": "NoSchedule",
+                     "key": "other",
+                     "operator": "Exists"
+                  }
+               ]
+            }
+         },
+         "traffic": [
+            {
+               "latestRevision": true,
+               "percent": 100
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "imagePullSecrets": [
+         {
+            "name": "ghcr-pull-secret"
+         }
+      ],
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app"
+      }
+   }
+]

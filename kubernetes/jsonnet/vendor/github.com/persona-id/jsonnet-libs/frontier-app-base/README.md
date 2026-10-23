@@ -59,7 +59,7 @@ renders as-is:
 | `workers`, `scheduledJobs` | Keyed by normalized name, when `backgroundJobs.enabled` |
 | `valkey`, `jobQueue` | Each an instance: `serviceAccount`, `configMap`, `persistentVolumeClaim`, `service`, `deployment`, `peerAuthentication`, `authorizationPolicy` |
 | `onePasswordItems`, `sealedSecrets` | Keyed by normalized name |
-| `gcsStorageBuckets` | Keyed by name, each with `bucket` and `iamPolicy` |
+| `gcsStorageBuckets` | Keyed by name, each with `bucket` and `iamPolicy` (an IAMPartialPolicy) |
 
 Any object can be patched with `+`:
 
@@ -71,6 +71,65 @@ frontier.new(config) + {
 
 Outside Tanka, `frontier.toList(frontier.new(config))` flattens the result into a
 plain list of objects for `kubectl apply`.
+
+## Preview environments
+
+`frontier.preview(config, prNumber)` renders a pull request's preview environment
+from the app's merged development config. persona-kubernetes deploys it for each pull
+request labelled `preview-env` and deletes it when the pull request closes or loses
+the label. It returns what `new` returns, with these differences:
+
+- Everything lands in `<dev namespace>-pr-<prNumber>`, served at
+  `app-<that namespace>.<visibility>.frontier.withpersona.app`. `appName` and
+  `releaseName` get the same suffix. The Namespace is labelled
+  `frontier.withpersona.com/preview: "true"` and listed in the `dev` catalog.
+- It uses the dev app's data. A `frontierPreview` field holds a `FrontierPreview`
+  that names every Secret the app reads. persona-kubernetes copies those Secrets from
+  the dev namespace under the same names, including `mongo-credentials`, so the
+  preview reads dev's Mongo database. `gcsStorageBuckets` holds an `IAMPolicyMember`
+  per bucket that grants the preview's `app` ServiceAccount the dev app's role on the
+  dev bucket, which must be object viewer, creator or user.
+- Nothing that would duplicate or fight the dev app renders: `sealedSecrets`,
+  `onePasswordItems`, `mongoDatabase`, `mysqlDatabase`, `mysqlMigration` and
+  `domainMappings` are absent, and no bucket or bucket policy of its own renders.
+  MySQL stays disabled. A preview cannot assume the dev database's workload
+  identity, so it gets no Cloud SQL resources, migration, proxy, or `MYSQL_*` settings.
+  The `app` ServiceAccount gets no `gcpServiceAccount` annotation.
+- Valkey and the job queue are the preview's own, so dev workers never run a
+  preview's jobs. Workers run, and scheduled jobs are suspended so they don't run
+  twice against dev's data.
+- `env` values that contain `app-<dev namespace>.` point at the preview's hostname
+  instead, and `FRONTIER_PREVIEW=true` and `FRONTIER_PREVIEW_PR=<prNumber>` are set.
+
+## MySQL
+
+MySQL is off by default. Each long-lived environment opts in separately:
+
+```jsonnet
+mysql: {
+  enabled: true,
+  projectId: 'persona-frontier-staging',
+  instance: { profile: 'environment-default' },
+}
+```
+
+Each opted-in environment gets a separate Config Connector-managed instance.
+`environment-default` selects a zonal instance for development and a regional
+HA instance for production. The concrete `zonal` and `regional-ha` profiles can
+also be selected explicitly, so a production environment can opt into a zonal
+non-HA instance when appropriate. These profiles use Cloud SQL Enterprise;
+“regional HA” describes availability and does not mean Enterprise Plus. Project,
+network, deletion protection, backups and machine policy remain under platform
+control.
+
+The profile is chosen when the instance is first created. Changing it means
+creating a new instance and migrating the data.
+
+The library creates the Cloud SQL instance, database, IAM user and Workload
+Identity binding in the app namespace, and annotates the app ServiceAccount
+with that Google service account. MySQL cannot be combined with
+`gcpServiceAccount.enabled`, because the library must create and grant the same
+identity the workload uses. A preview gets none of these resources.
 
 ## Configuration
 
@@ -180,6 +239,10 @@ Options that stand in for things Helm provided:
   rather than inheriting it.
 - **Config checksums** on the Valkey pods hash the whole config file, so any config
   change restarts the pod.
+- **No `helm.sh/resource-policy: keep` on the job queue's claim.** Argo CD ignores it.
+  The claim's name still follows the chart: `job-queue-hyperdisk` when
+  `jobQueue.computeClass` is set, `job-queue` otherwise, so a queue moved from the
+  chart keeps its disk.
 - **The bootstrap chart is folded in.** The Namespace and RoleBindings it had kro create
   are rendered here, from the same `permissions` and `homestead` values. The cluster's
   environment, which kro took from its own config, is `clusterEnvironment`.

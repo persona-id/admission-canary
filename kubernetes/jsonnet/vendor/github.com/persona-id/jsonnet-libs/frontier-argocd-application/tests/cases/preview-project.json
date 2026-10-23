@@ -1,0 +1,80 @@
+{
+   "apiVersion": "argoproj.io/v1alpha1",
+   "kind": "AppProject",
+   "metadata": {
+      "name": "preview-frontier-my-app",
+      "namespace": "argocd"
+   },
+   "spec": {
+      "clusterResourceWhitelist": [
+         {
+            "group": "",
+            "kind": "Namespace"
+         }
+      ],
+      "description": "Pull request preview environments of Frontier app my-app, registered in frontier-app-registry",
+      "destinations": [
+         {
+            "namespace": "frontier-my-app-dev-pr-*",
+            "server": "https://kubernetes.default.svc"
+         }
+      ],
+      "namespaceResourceWhitelist": [
+         {
+            "group": "",
+            "kind": "ConfigMap"
+         },
+         {
+            "group": "",
+            "kind": "PersistentVolumeClaim"
+         },
+         {
+            "group": "",
+            "kind": "Service"
+         },
+         {
+            "group": "",
+            "kind": "ServiceAccount"
+         },
+         {
+            "group": "apps",
+            "kind": "Deployment"
+         },
+         {
+            "group": "batch",
+            "kind": "CronJob"
+         },
+         {
+            "group": "networking.istio.io",
+            "kind": "VirtualService"
+         },
+         {
+            "group": "policy",
+            "kind": "PodDisruptionBudget"
+         },
+         {
+            "group": "rbac.authorization.k8s.io",
+            "kind": "RoleBinding"
+         },
+         {
+            "group": "security.istio.io",
+            "kind": "AuthorizationPolicy"
+         },
+         {
+            "group": "security.istio.io",
+            "kind": "PeerAuthentication"
+         },
+         {
+            "group": "security.istio.io",
+            "kind": "RequestAuthentication"
+         },
+         {
+            "group": "serving.knative.dev",
+            "kind": "Service"
+         }
+      ],
+      "sourceRepos": [
+         "https://github.com/persona-id/my-app"
+      ]
+   }
+}

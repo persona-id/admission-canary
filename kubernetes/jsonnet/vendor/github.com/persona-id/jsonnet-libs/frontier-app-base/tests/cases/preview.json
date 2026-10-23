@@ -1,0 +1,1883 @@
+[
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "allow-intra-namespace"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "namespaces": [
+                           "frontier-demo-dev-pr-42"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-s2s"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "paths": [
+                           "/metrics",
+                           "/healthz"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz"
+                        ],
+                        "paths": [
+                           "/webhooks/stripe",
+                           "/public/*"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz",
+                           "/webhooks/stripe",
+                           "/public/*"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ],
+               "when": [
+                  {
+                     "key": "request.auth.claims[email]",
+                     "values": [
+                        "a@withpersona.com"
+                     ]
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz",
+                           "/webhooks/stripe",
+                           "/public/*"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ],
+               "when": [
+                  {
+                     "key": "request.auth.claims[groups]",
+                     "values": [
+                        "Role-Engineering"
+                     ]
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/knative-serving/sa/activator",
+                           "cluster.local/ns/knative-serving/sa/controller"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "frontier.withpersona.com/v1alpha1",
+      "kind": "FrontierPreview",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "preview"
+      },
+      "spec": {
+         "secrets": [
+            "another-secret",
+            "mongo-credentials",
+            "sealed-one",
+            "sealed-two",
+            "some-secret"
+         ]
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicyMember",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "persona-frontier-foo-bucket"
+      },
+      "spec": {
+         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
+         "resourceRef": {
+            "kind": "StorageBucket",
+            "name": "persona-frontier-foo-bucket",
+            "namespace": "frontier-demo-dev"
+         },
+         "role": "roles/storage.objectUser"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicyMember",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "persona-frontier-other"
+      },
+      "spec": {
+         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
+         "resourceRef": {
+            "kind": "StorageBucket",
+            "name": "persona-frontier-other",
+            "namespace": "frontier-demo-dev"
+         },
+         "role": "roles/storage.objectViewer"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "job-queue-allow-app"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/frontier-demo-dev-pr-42/sa/app"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "job-queue"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "data": {
+         "valkey.conf": "port 6379\n# No password. Protection is STRICT mTLS plus an AuthorizationPolicy\n# admitting only the `app` ServiceAccount.\nprotected-mode no\nbind * -::*\ndir /data\n# Every job reaches disk as it arrives. This is the whole reason the queue\n# is a separate instance from the `valkey` cache.\nappendonly yes\nappendfsync everysec\nmaxmemory 512mb\n# Refuse new work rather than deleting queued work when memory fills. The\n# cache does the opposite (allkeys-lru); one instance cannot do both.\nmaxmemory-policy noeviction\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue-config"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      },
+      "spec": {
+         "replicas": 1,
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+               "app.kubernetes.io/name": "job-queue"
+            }
+         },
+         "strategy": {
+            "type": "Recreate"
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "checksum/config": "5cbb5ce163d38d6d"
+               },
+               "labels": {
+                  "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                  "app.kubernetes.io/name": "job-queue"
+               }
+            },
+            "spec": {
+               "automountServiceAccountToken": false,
+               "containers": [
+                  {
+                     "args": [
+                        "/etc/valkey/valkey.conf"
+                     ],
+                     "command": [
+                        "valkey-server"
+                     ],
+                     "image": "docker.io/valkey/valkey:9.0.2",
+                     "imagePullPolicy": "IfNotPresent",
+                     "livenessProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "name": "job-queue",
+                     "ports": [
+                        {
+                           "containerPort": 6379,
+                           "name": "tcp",
+                           "protocol": "TCP"
+                        }
+                     ],
+                     "resources": {
+                        "limits": {
+                           "memory": "1Gi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "512Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "capabilities": {
+                           "drop": [
+                              "ALL"
+                           ]
+                        },
+                        "readOnlyRootFilesystem": true
+                     },
+                     "startupProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/data",
+                           "name": "data"
+                        },
+                        {
+                           "mountPath": "/etc/valkey",
+                           "name": "config",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "securityContext": {
+                  "fsGroup": 1000,
+                  "runAsGroup": 1000,
+                  "runAsNonRoot": true,
+                  "runAsUser": 1000,
+                  "seccompProfile": {
+                     "type": "RuntimeDefault"
+                  }
+               },
+               "serviceAccountName": "job-queue",
+               "volumes": [
+                  {
+                     "name": "data",
+                     "persistentVolumeClaim": {
+                        "claimName": "job-queue"
+                     }
+                  },
+                  {
+                     "configMap": {
+                        "name": "job-queue-config"
+                     },
+                     "name": "config"
+                  }
+               ]
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "job-queue-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "job-queue"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      },
+      "spec": {
+         "accessModes": [
+            "ReadWriteOnce"
+         ],
+         "resources": {
+            "requests": {
+               "storage": "8Gi"
+            }
+         },
+         "storageClassName": "premium",
+         "volumeMode": "Filesystem"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "tcp",
+               "port": 6379,
+               "protocol": "TCP",
+               "targetPort": "tcp"
+            }
+         ],
+         "selector": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "type": "ClusterIP"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "job-queue"
+         },
+         "name": "job-queue"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+         "labels": {
+            "app": "demo-dev-pr-42",
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "development",
+            "frontier.withpersona.com/preview": "true",
+            "homestead.withpersona.com/catalog": "dev",
+            "istio.io/rev": "stable",
+            "name": "frontier-demo-dev-pr-42"
+         },
+         "name": "frontier-demo-dev-pr-42"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "collaborator-crd-access-alex-r"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "alex-r@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "collaborator-crd-access-sam"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "sam@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "collaborator-edit-alex-r"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "alex-r@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "collaborator-edit-sam"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "sam@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-crd-access"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "jane.doe@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-edit"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "jane.doe@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "batch/v1",
+      "kind": "CronJob",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/component": "scheduled-job",
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/workload": "nightly-report"
+         },
+         "name": "nightly-report"
+      },
+      "spec": {
+         "concurrencyPolicy": "Forbid",
+         "failedJobsHistoryLimit": 1,
+         "jobTemplate": {
+            "metadata": {
+               "labels": {
+                  "app.kubernetes.io/component": "scheduled-job",
+                  "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "frontier.withpersona.com/workload": "nightly-report"
+               }
+            },
+            "spec": {
+               "activeDeadlineSeconds": 3600,
+               "backoffLimit": 3,
+               "template": {
+                  "metadata": {
+                     "labels": {
+                        "app.kubernetes.io/component": "scheduled-job",
+                        "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                        "app.kubernetes.io/managed-by": "tanka",
+                        "app.kubernetes.io/name": "frontier-app-base",
+                        "environment": "development",
+                        "frontier.withpersona.com/workload": "nightly-report"
+                     }
+                  },
+                  "spec": {
+                     "containers": [
+                        {
+                           "args": [
+                              "--all"
+                           ],
+                           "command": [
+                              "bin/report"
+                           ],
+                           "env": [
+                              {
+                                 "name": "SOME_USER",
+                                 "valueFrom": {
+                                    "secretKeyRef": {
+                                       "key": "username",
+                                       "name": "some-secret"
+                                    }
+                                 }
+                              },
+                              {
+                                 "name": "SEALED_ONE",
+                                 "valueFrom": {
+                                    "secretKeyRef": {
+                                       "key": "value",
+                                       "name": "sealed-one"
+                                    }
+                                 }
+                              },
+                              {
+                                 "name": "SEALED_TWO",
+                                 "valueFrom": {
+                                    "secretKeyRef": {
+                                       "key": "value",
+                                       "name": "sealed-two"
+                                    }
+                                 }
+                              },
+                              {
+                                 "name": "REDIS_URL",
+                                 "value": "redis://valkey:6379"
+                              },
+                              {
+                                 "name": "VALKEY_URL",
+                                 "value": "redis://valkey:6379"
+                              },
+                              {
+                                 "name": "JOB_QUEUE_URL",
+                                 "value": "redis://job-queue:6379"
+                              },
+                              {
+                                 "name": "REDIS_ADDR",
+                                 "value": "job-queue:6379"
+                              },
+                              {
+                                 "name": "MONGODB_URI",
+                                 "valueFrom": {
+                                    "secretKeyRef": {
+                                       "key": "connectionStringPrivateSrv",
+                                       "name": "mongo-credentials"
+                                    }
+                                 }
+                              },
+                              {
+                                 "name": "MONGODB_DB_NAME",
+                                 "valueFrom": {
+                                    "secretKeyRef": {
+                                       "key": "username",
+                                       "name": "mongo-credentials"
+                                    }
+                                 }
+                              },
+                              {
+                                 "name": "LOG_LEVEL",
+                                 "value": "debug"
+                              },
+                              {
+                                 "name": "NUM",
+                                 "value": "3"
+                              },
+                              {
+                                 "name": "APP_URL",
+                                 "value": "https://app-frontier-demo-dev-pr-42.public.frontier.withpersona.app/callback"
+                              },
+                              {
+                                 "name": "FRONTIER_PREVIEW",
+                                 "value": "true"
+                              },
+                              {
+                                 "name": "FRONTIER_PREVIEW_PR",
+                                 "value": "42"
+                              }
+                           ],
+                           "image": "ghcr.io/persona-id/demo:abc123",
+                           "name": "job",
+                           "resources": {
+                              "limits": {
+                                 "memory": "512Mi"
+                              },
+                              "requests": {
+                                 "cpu": "100m",
+                                 "memory": "256Mi"
+                              }
+                           },
+                           "volumeMounts": [
+                              {
+                                 "mountPath": "/secrets/another",
+                                 "name": "another-secret",
+                                 "readOnly": true
+                              },
+                              {
+                                 "mountPath": "/secrets/sealed",
+                                 "name": "sealed-one",
+                                 "readOnly": true
+                              },
+                              {
+                                 "mountPath": "/var/run/secrets/tokens/oracle",
+                                 "name": "oracle-oidc",
+                                 "readOnly": true
+                              }
+                           ]
+                        }
+                     ],
+                     "nodeSelector": {
+                        "cloud.google.com/compute-class": "standard"
+                     },
+                     "restartPolicy": "Never",
+                     "serviceAccountName": "app",
+                     "tolerations": [
+                        {
+                           "effect": "NoSchedule",
+                           "key": "cloud.google.com/compute-class",
+                           "operator": "Equal",
+                           "value": "standard"
+                        },
+                        {
+                           "effect": "NoSchedule",
+                           "key": "other",
+                           "operator": "Exists"
+                        }
+                     ],
+                     "volumes": [
+                        {
+                           "name": "another-secret",
+                           "secret": {
+                              "secretName": "another-secret"
+                           }
+                        },
+                        {
+                           "name": "sealed-one",
+                           "secret": {
+                              "secretName": "sealed-one"
+                           }
+                        },
+                        {
+                           "name": "oracle-oidc",
+                           "projected": {
+                              "sources": [
+                                 {
+                                    "serviceAccountToken": {
+                                       "audience": "https://oracle.example",
+                                       "expirationSeconds": 3600,
+                                       "path": "token"
+                                    }
+                                 }
+                              ]
+                           }
+                        }
+                     ]
+                  }
+               },
+               "ttlSecondsAfterFinished": 604800
+            }
+         },
+         "schedule": "0 2 * * *",
+         "startingDeadlineSeconds": 100,
+         "successfulJobsHistoryLimit": 3,
+         "suspend": true,
+         "timeZone": "America/Los_Angeles"
+      }
+   },
+   {
+      "apiVersion": "serving.knative.dev/v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "knative.withpersona.com/visibility": "public"
+         },
+         "name": "app"
+      },
+      "spec": {
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "autoscaling.knative.dev/maxScale": "5",
+                  "autoscaling.knative.dev/minScale": "1",
+                  "autoscaling.knative.dev/target-burst-capacity": "0"
+               },
+               "labels": {
+                  "environment": "development",
+                  "frontier.withpersona.com/custom-denied-message": "true"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "env": [
+                        {
+                           "name": "SOME_USER",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "some-secret"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_ONE",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-one"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_TWO",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-two"
+                              }
+                           }
+                        },
+                        {
+                           "name": "REDIS_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "VALKEY_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "JOB_QUEUE_URL",
+                           "value": "redis://job-queue:6379"
+                        },
+                        {
+                           "name": "REDIS_ADDR",
+                           "value": "job-queue:6379"
+                        },
+                        {
+                           "name": "MONGODB_URI",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "connectionStringPrivateSrv",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "MONGODB_DB_NAME",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "LOG_LEVEL",
+                           "value": "debug"
+                        },
+                        {
+                           "name": "NUM",
+                           "value": "3"
+                        },
+                        {
+                           "name": "APP_URL",
+                           "value": "https://app-frontier-demo-dev-pr-42.public.frontier.withpersona.app/callback"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW",
+                           "value": "true"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW_PR",
+                           "value": "42"
+                        }
+                     ],
+                     "image": "ghcr.io/persona-id/demo:abc123",
+                     "ports": [
+                        {
+                           "containerPort": 8080
+                        }
+                     ],
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/secrets/another",
+                           "name": "another-secret",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/secrets/sealed",
+                           "name": "sealed-one",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/var/run/secrets/tokens/oracle",
+                           "name": "oracle-oidc",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard"
+               },
+               "serviceAccountName": "app",
+               "timeoutSeconds": 300,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard"
+                  },
+                  {
+                     "effect": "NoSchedule",
+                     "key": "other",
+                     "operator": "Exists"
+                  }
+               ],
+               "volumes": [
+                  {
+                     "name": "another-secret",
+                     "secret": {
+                        "secretName": "another-secret"
+                     }
+                  },
+                  {
+                     "name": "sealed-one",
+                     "secret": {
+                        "secretName": "sealed-one"
+                     }
+                  },
+                  {
+                     "name": "oracle-oidc",
+                     "projected": {
+                        "sources": [
+                           {
+                              "serviceAccountToken": {
+                                 "audience": "https://oracle.example",
+                                 "expirationSeconds": 3600,
+                                 "path": "token"
+                              }
+                           }
+                        ]
+                     }
+                  }
+               ]
+            }
+         },
+         "traffic": [
+            {
+               "latestRevision": true,
+               "percent": 100
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "imagePullSecrets": [
+         {
+            "name": "ghcr-pull-secret"
+         }
+      ],
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "RequestAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-okta-jwt"
+      },
+      "spec": {
+         "jwtRules": [
+            {
+               "forwardOriginalToken": false,
+               "issuer": "https://persona.okta.com",
+               "jwksUri": "https://persona.okta.com/oauth2/v1/keys"
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-require-auth"
+      },
+      "spec": {
+         "action": "CUSTOM",
+         "provider": {
+            "name": "oauth2-proxy"
+         },
+         "rules": [
+            {
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz",
+                           "/webhooks/stripe",
+                           "/public/*"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "valkey-allow-app"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/frontier-demo-dev-pr-42/sa/app",
+                           "cluster.local/ns/frontier-demo-dev-pr-42/sa/valkey"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "valkey"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "data": {
+         "valkey.conf": "port 6379\n# No password. Protection is STRICT mTLS plus an AuthorizationPolicy\n# admitting only the `app` ServiceAccount.\nprotected-mode no\nbind * -::*\ndir /data\nmaxmemory 200mb\nmaxmemory-policy allkeys-lru\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "name": "valkey-config"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "name": "valkey"
+      },
+      "spec": {
+         "replicas": 1,
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+               "app.kubernetes.io/name": "valkey"
+            }
+         },
+         "strategy": {
+            "type": "Recreate"
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "checksum/config": "048c5fdaba90aae7"
+               },
+               "labels": {
+                  "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                  "app.kubernetes.io/name": "valkey"
+               }
+            },
+            "spec": {
+               "automountServiceAccountToken": false,
+               "containers": [
+                  {
+                     "args": [
+                        "/etc/valkey/valkey.conf"
+                     ],
+                     "command": [
+                        "valkey-server"
+                     ],
+                     "image": "docker.io/valkey/valkey:9.0.2",
+                     "imagePullPolicy": "IfNotPresent",
+                     "livenessProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "name": "valkey",
+                     "ports": [
+                        {
+                           "containerPort": 6379,
+                           "name": "tcp",
+                           "protocol": "TCP"
+                        }
+                     ],
+                     "resources": {
+                        "limits": {
+                           "memory": "350Mi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "256Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "capabilities": {
+                           "drop": [
+                              "ALL"
+                           ]
+                        },
+                        "readOnlyRootFilesystem": true
+                     },
+                     "startupProbe": {
+                        "exec": {
+                           "command": [
+                              "sh",
+                              "-c",
+                              "valkey-cli ping"
+                           ]
+                        }
+                     },
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/data",
+                           "name": "data"
+                        },
+                        {
+                           "mountPath": "/etc/valkey",
+                           "name": "config",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "securityContext": {
+                  "fsGroup": 1000,
+                  "runAsGroup": 1000,
+                  "runAsNonRoot": true,
+                  "runAsUser": 1000,
+                  "seccompProfile": {
+                     "type": "RuntimeDefault"
+                  }
+               },
+               "serviceAccountName": "valkey",
+               "volumes": [
+                  {
+                     "name": "data",
+                     "persistentVolumeClaim": {
+                        "claimName": "valkey"
+                     }
+                  },
+                  {
+                     "configMap": {
+                        "name": "valkey-config"
+                     },
+                     "name": "config"
+                  }
+               ]
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1beta1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "valkey-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "app.kubernetes.io/name": "valkey"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "name": "valkey"
+      },
+      "spec": {
+         "accessModes": [
+            "ReadWriteOnce"
+         ],
+         "resources": {
+            "requests": {
+               "storage": "1Gi"
+            }
+         },
+         "volumeMode": "Filesystem"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "name": "valkey"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "tcp",
+               "port": 6379,
+               "protocol": "TCP",
+               "targetPort": "tcp"
+            }
+         ],
+         "selector": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "type": "ClusterIP"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "automountServiceAccountToken": false,
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "valkey"
+         },
+         "name": "valkey"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/component": "worker",
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/workload": "sidekiq"
+         },
+         "name": "sidekiq"
+      },
+      "spec": {
+         "replicas": 2,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "sidekiq"
+            }
+         },
+         "template": {
+            "metadata": {
+               "labels": {
+                  "app.kubernetes.io/component": "worker",
+                  "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "environment": "development",
+                  "frontier.withpersona.com/workload": "sidekiq"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "command": [
+                        "bundle",
+                        "exec",
+                        "sidekiq"
+                     ],
+                     "env": [
+                        {
+                           "name": "SOME_USER",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "some-secret"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_ONE",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-one"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_TWO",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-two"
+                              }
+                           }
+                        },
+                        {
+                           "name": "REDIS_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "VALKEY_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "JOB_QUEUE_URL",
+                           "value": "redis://job-queue:6379"
+                        },
+                        {
+                           "name": "REDIS_ADDR",
+                           "value": "job-queue:6379"
+                        },
+                        {
+                           "name": "MONGODB_URI",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "connectionStringPrivateSrv",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "MONGODB_DB_NAME",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "LOG_LEVEL",
+                           "value": "debug"
+                        },
+                        {
+                           "name": "NUM",
+                           "value": "3"
+                        },
+                        {
+                           "name": "APP_URL",
+                           "value": "https://app-frontier-demo-dev-pr-42.public.frontier.withpersona.app/callback"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW",
+                           "value": "true"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW_PR",
+                           "value": "42"
+                        }
+                     ],
+                     "image": "ghcr.io/persona-id/demo:abc123",
+                     "name": "worker",
+                     "resources": {
+                        "limits": {
+                           "memory": "2Gi"
+                        },
+                        "requests": {
+                           "cpu": "500m",
+                           "memory": "1Gi"
+                        }
+                     },
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/secrets/another",
+                           "name": "another-secret",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/secrets/sealed",
+                           "name": "sealed-one",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/var/run/secrets/tokens/oracle",
+                           "name": "oracle-oidc",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard"
+               },
+               "serviceAccountName": "app",
+               "terminationGracePeriodSeconds": 30,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard"
+                  },
+                  {
+                     "effect": "NoSchedule",
+                     "key": "other",
+                     "operator": "Exists"
+                  }
+               ],
+               "volumes": [
+                  {
+                     "name": "another-secret",
+                     "secret": {
+                        "secretName": "another-secret"
+                     }
+                  },
+                  {
+                     "name": "sealed-one",
+                     "secret": {
+                        "secretName": "sealed-one"
+                     }
+                  },
+                  {
+                     "name": "oracle-oidc",
+                     "projected": {
+                        "sources": [
+                           {
+                              "serviceAccountToken": {
+                                 "audience": "https://oracle.example",
+                                 "expirationSeconds": 3600,
+                                 "path": "token"
+                              }
+                           }
+                        ]
+                     }
+                  }
+               ]
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/component": "worker",
+            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/workload": "sync-job"
+         },
+         "name": "sync-job"
+      },
+      "spec": {
+         "replicas": 1,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "sync-job"
+            }
+         },
+         "strategy": {
+            "type": "Recreate"
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "ad.datadoghq.com/worker.logs": "[{\"source\":\"ruby\"}]"
+               },
+               "labels": {
+                  "app.kubernetes.io/component": "worker",
+                  "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "environment": "development",
+                  "frontier.withpersona.com/workload": "sync-job",
+                  "tags.datadoghq.com/service": "demo-sync"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "env": [
+                        {
+                           "name": "SOME_USER",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "some-secret"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_ONE",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-one"
+                              }
+                           }
+                        },
+                        {
+                           "name": "SEALED_TWO",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "value",
+                                 "name": "sealed-two"
+                              }
+                           }
+                        },
+                        {
+                           "name": "REDIS_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "VALKEY_URL",
+                           "value": "redis://valkey:6379"
+                        },
+                        {
+                           "name": "JOB_QUEUE_URL",
+                           "value": "redis://job-queue:6379"
+                        },
+                        {
+                           "name": "REDIS_ADDR",
+                           "value": "job-queue:6379"
+                        },
+                        {
+                           "name": "MONGODB_URI",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "connectionStringPrivateSrv",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "MONGODB_DB_NAME",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "username",
+                                 "name": "mongo-credentials"
+                              }
+                           }
+                        },
+                        {
+                           "name": "LOG_LEVEL",
+                           "value": "warn"
+                        },
+                        {
+                           "name": "NUM",
+                           "value": "3"
+                        },
+                        {
+                           "name": "APP_URL",
+                           "value": "https://app-frontier-demo-dev-pr-42.public.frontier.withpersona.app/callback"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW",
+                           "value": "true"
+                        },
+                        {
+                           "name": "FRONTIER_PREVIEW_PR",
+                           "value": "42"
+                        },
+                        {
+                           "name": "ROLE",
+                           "value": "worker"
+                        }
+                     ],
+                     "image": "postgres:17-alpine",
+                     "livenessProbe": {
+                        "exec": {
+                           "command": [
+                              "test",
+                              "-f",
+                              "/tmp/ready"
+                           ]
+                        }
+                     },
+                     "name": "worker",
+                     "resources": {
+                        "limits": {
+                           "memory": "3Gi"
+                        },
+                        "requests": {
+                           "cpu": "500m",
+                           "memory": "1Gi"
+                        }
+                     },
+                     "volumeMounts": [
+                        {
+                           "mountPath": "/secrets/another",
+                           "name": "another-secret",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/secrets/sealed",
+                           "name": "sealed-one",
+                           "readOnly": true
+                        },
+                        {
+                           "mountPath": "/var/run/secrets/tokens/oracle",
+                           "name": "oracle-oidc",
+                           "readOnly": true
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard-highcpu"
+               },
+               "serviceAccountName": "app",
+               "terminationGracePeriodSeconds": 60,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard-highcpu"
+                  },
+                  {
+                     "effect": "NoSchedule",
+                     "key": "other",
+                     "operator": "Exists"
+                  }
+               ],
+               "volumes": [
+                  {
+                     "name": "another-secret",
+                     "secret": {
+                        "secretName": "another-secret"
+                     }
+                  },
+                  {
+                     "name": "sealed-one",
+                     "secret": {
+                        "secretName": "sealed-one"
+                     }
+                  },
+                  {
+                     "name": "oracle-oidc",
+                     "projected": {
+                        "sources": [
+                           {
+                              "serviceAccountToken": {
+                                 "audience": "https://oracle.example",
+                                 "expirationSeconds": 3600,
+                                 "path": "token"
+                              }
+                           }
+                        ]
+                     }
+                  }
+               ]
+            }
+         }
+      }
+   }
+]

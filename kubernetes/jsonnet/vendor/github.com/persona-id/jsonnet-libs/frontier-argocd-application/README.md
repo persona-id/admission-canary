@@ -102,6 +102,47 @@ Apply it from somewhere the platform controls, never from an app's
 `kubernetes/deploy`. An app that renders its own project can loosen it.
 `newFrontierApp` puts Applications in this project.
 
+### An app's preview AppProject
+
+`newPreviewProject(repoURL)` is the `AppProject` for the pull request preview
+environments of the same app, which persona-kubernetes deploys for pull requests
+labelled `preview-env`. It is named `preview-frontier-<repository>`, a name no app's
+project can take, and:
+
+- allows only `repoURL` as a source
+- allows only `frontier-<repository>-dev-pr-*` namespaces as destinations
+- allows only the kinds frontier-app-base's `preview` renders, and `Namespace` as the
+  only cluster-scoped kind. A preview renders a pull request's head before anyone
+  has reviewed it, so any other kind, such as an `ExternalSecret`, a `SecretStore`, a
+  `OnePasswordItem`, a Config Connector resource or a `MongoDatabase`, fails to sync.
+
+`previewNamespace(repoURL, prNumber)` is the namespace pull request `prNumber`'s
+preview deploys to, `frontier-<repository>-dev-pr-<prNumber>`.
+
+Apply it from the same place as `newProject`.
+
+### An app's preview access AppProject
+
+`newPreviewAccessProject(repoURL)` is the `AppProject` for the Applications that give
+the same app's previews its dev Secrets and buckets. Each renders frontier-app-base's
+`previewAccess`; persona-kubernetes' ApplicationSet renders it from the app's
+registered revision, never the pull request, and the project doesn't enforce that. It
+is named `preview-access-frontier-<repository>` and:
+
+- allows only `repoURL` as a source
+- allows only `frontier-<repository>-dev` and `frontier-<repository>-dev-pr-*` as
+  destinations. The Role and RoleBinding that let a preview read dev's Secrets go in
+  the dev namespace
+- allows only the kinds `previewAccess` renders (`ServiceAccount`, `ExternalSecret`,
+  `SecretStore`, `IAMPolicyMember`, `Role` and `RoleBinding`), and `Namespace` as the
+  only cluster-scoped kind, so they can land before the preview's first sync creates
+  the namespace
+
+These kinds can reach the dev namespace's Secrets and IAM, which the app's own project
+already allows from the same repository.
+
+Apply it from the same place as `newProject`.
+
 ## Tests
 
 `tests/run.sh` renders each `tests/cases/*.jsonnet` and compares it with the `.json`

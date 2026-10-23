@@ -100,7 +100,7 @@ local app = import 'app.libsonnet';
   // RoleBindings to the `edit` and `frontier-namespace-owner` ClusterRoles.
   // Usernames without @withpersona.com.
   permissions: {
-    owner: '',  // required: your-username (without @withpersona.com)
+    owner: 'chaitanya.prasad',  // required: your-username (without @withpersona.com)
     // additionalCollaborators: [
     //   'username',
     // ],

@@ -10,12 +10,15 @@ local volumeMount = k.core.v1.volumeMount;
 {
   // A Valkey instance; see `valkeyInstances` in helpers.libsonnet.
   //
-  // No compute-class nodeSelector or toleration, deliberately: the pod owns a
-  // pd-balanced disk, compute-class nodes are hyperdisk-only, and a disk cannot
-  // change zone. Omitting the toleration lets the class taint keep the pod on the
-  // untainted pool, where its disk can attach.
+  // Without the instance's own `computeClass`, no nodeSelector or toleration,
+  // deliberately: the pod owns a pd-balanced disk, compute-class nodes are
+  // hyperdisk-only, and a disk cannot change zone. Omitting the toleration lets the
+  // class taint keep the pod on the untainted pool, where its disk can attach. Only
+  // the job queue takes a class, `jobQueue.computeClass`, which also moves it to a
+  // Hyperdisk claim. It never takes the app's `tolerations`.
   valkey(cfg, instance)::
     local selector = h.valkeySelector(cfg, instance);
+    local placement = h.placement(cfg { tolerations: [] }, instance.computeClass);
 
     deployment.new(instance.name, replicas=1, containers=[
       container.new(instance.name, '%s:%s' % [instance.image.repository, instance.image.tag])
@@ -41,6 +44,9 @@ local volumeMount = k.core.v1.volumeMount;
     // Restarts the pod when the config changes; valkey reads its config once at boot.
     + deployment.spec.template.metadata.withAnnotations({ 'checksum/config': std.substr(std.md5(instance.conf), 0, 16) })
     + deployment.spec.template.metadata.withLabels(selector)
+    + (if placement.nodeSelector != {} then deployment.spec.template.spec.withNodeSelector(placement.nodeSelector) else {})
+    + (if instance.priorityClassName != '' then deployment.spec.template.spec.withPriorityClassName(instance.priorityClassName) else {})
+    + (if placement.tolerations != [] then deployment.spec.template.spec.withTolerations(placement.tolerations) else {})
     + deployment.spec.template.spec.securityContext.seccompProfile.withType('RuntimeDefault')
     // fsGroup so the mounted disk is writable by the unprivileged user.
     + deployment.spec.template.spec.securityContext.withFsGroup(1000)
@@ -51,7 +57,7 @@ local volumeMount = k.core.v1.volumeMount;
     + deployment.spec.template.spec.withServiceAccountName(instance.name)
     + deployment.spec.template.spec.withVolumes([
       if instance.storage != null
-      then volume.fromPersistentVolumeClaim('data', instance.name)
+      then volume.fromPersistentVolumeClaim('data', instance.storage.claimName)
       else volume.fromEmptyDir('data'),
       volume.fromConfigMap('config', '%s-config' % instance.name),
     ]),
@@ -92,6 +98,7 @@ local volumeMount = k.core.v1.volumeMount;
     + (if podAnnotations != {} then deployment.spec.template.metadata.withAnnotations(podAnnotations) else {})
     + deployment.spec.template.metadata.withLabels(h.workloadLabels(cfg, worker, 'worker', name))
     + (if placement.nodeSelector != {} then deployment.spec.template.spec.withNodeSelector(placement.nodeSelector) else {})
+    + (if cfg.mysql.enabled then { spec+: { template+: { spec+: { initContainers: [h.mysqlProxyContainer(cfg, nativeSidecar=true)] } } } } else {})
     + deployment.spec.template.spec.withServiceAccountName('app')
     // Time a worker gets to finish the job in hand after SIGTERM.
     + deployment.spec.template.spec.withTerminationGracePeriodSeconds(h.get(worker, 'terminationGracePeriodSeconds', 30))

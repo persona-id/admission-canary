@@ -9,7 +9,7 @@
 // CI fails if it doesn't match the repository's name. Change it only when renaming
 // the repository, and register the new name in frontier-app-registry.
 {
-  name: 'persona-template-frontier-app',
+  name: 'admission-canary',
 
   repoURL: 'https://github.com/persona-id/' + self.name,
   imageRepository: 'ghcr.io/persona-id/' + self.name,

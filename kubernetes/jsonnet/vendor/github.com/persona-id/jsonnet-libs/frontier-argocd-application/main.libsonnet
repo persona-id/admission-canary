@@ -6,7 +6,8 @@
 // `newFrontierApp` is the Application for one environment of a repo built from
 // persona-template-frontier-app, whose kubernetes/jsonnet/<env>/main.jsonnet renders
 // frontier-app-base. `newProject` is the AppProject for one app registered in
-// frontier-app-registry.
+// frontier-app-registry, `newPreviewProject` the one for its pull request previews,
+// and `newPreviewAccessProject` the one for their access to dev.
 local argocd = import 'github.com/jsonnet-libs/argo-cd-libsonnet/3.2/main.libsonnet';
 
 local application = argocd.argoproj.v1alpha1.application;
@@ -33,6 +34,29 @@ local appNameOf(repoURL) =
 
 // The namespaces frontier-<name> lets its Applications deploy to.
 local namespacesOf(name) = ['frontier-%s-%s' % [name, env] for env in ['dev', 'prod']];
+
+// The kinds frontier-app-base's `preview` renders, by API group. Preview manifests
+// come from unreviewed pull request heads, so anything else, such as an
+// ExternalSecret, SecretStore, OnePasswordItem, Config Connector resource or
+// MongoDatabase, must fail at sync rather than reach another namespace's data.
+local previewKinds = {
+  '': ['ConfigMap', 'PersistentVolumeClaim', 'Service', 'ServiceAccount'],
+  apps: ['Deployment'],
+  batch: ['CronJob'],
+  'networking.istio.io': ['VirtualService'],
+  policy: ['PodDisruptionBudget'],
+  'rbac.authorization.k8s.io': ['RoleBinding'],
+  'security.istio.io': ['AuthorizationPolicy', 'PeerAuthentication', 'RequestAuthentication'],
+  'serving.knative.dev': ['Service'],
+};
+
+// The kinds frontier-app-base's `previewAccess` renders, by API group.
+local previewAccessKinds = {
+  '': ['ServiceAccount'],
+  'external-secrets.io': ['ExternalSecret', 'SecretStore'],
+  'iam.cnrm.cloud.google.com': ['IAMPolicyMember'],
+  'rbac.authorization.k8s.io': ['Role', 'RoleBinding'],
+};
 
 // An Application in `project` that deploys `path` in `repoURL`, at `targetRevision`,
 // to `namespace` in the cluster ArgoCD runs in.
@@ -134,4 +158,65 @@ local newApplication(name, namespace, project, repoURL, path, targetRevision, au
       appProject.spec.clusterResourceWhitelist.withGroup('')
       + appProject.spec.clusterResourceWhitelist.withKind('Namespace')
     ),
+
+  // The namespace pull request `prNumber`'s preview environment of the app with
+  // `repoURL` deploys to, the one frontier-app-base's `preview` renders into.
+  previewNamespace(repoURL, prNumber)::
+    local pr = std.toString(prNumber);
+    assert pr != '' && pr[0] != '0' && std.all([std.member('0123456789', c) for c in std.stringChars(pr)]) :
+           'prNumber must be a positive integer, got "%s"' % pr;
+    'frontier-%s-dev-pr-%s' % [appNameOf(repoURL), pr],
+
+  // The AppProject for the pull request preview environments of the app registered in
+  // frontier-app-registry with `repoURL`, named preview-frontier-<repository> so it
+  // can't collide with any app's frontier-<repository>. It only lets them deploy that
+  // repository to frontier-<repository>-dev-pr-* namespaces, and only the kinds
+  // frontier-app-base's `preview` renders. Like `newProject`, it is for the platform to
+  // apply from the registry, never from an app's repository.
+  newPreviewProject(repoURL)::
+    local name = appNameOf(repoURL);
+
+    appProject.new('preview-frontier-' + name)
+    + appProject.metadata.withNamespace('argocd')
+    + appProject.spec.withDescription('Pull request preview environments of Frontier app %s, registered in frontier-app-registry' % name)
+    + appProject.spec.withSourceRepos([repoURL])
+    + appProject.spec.withDestinations([
+      appProject.spec.destinations.withServer('https://kubernetes.default.svc')
+      + appProject.spec.destinations.withNamespace('frontier-%s-dev-pr-*' % name),
+    ])
+    + appProject.spec.withClusterResourceWhitelist(
+      appProject.spec.clusterResourceWhitelist.withGroup('')
+      + appProject.spec.clusterResourceWhitelist.withKind('Namespace')
+    )
+    + appProject.spec.withNamespaceResourceWhitelist([
+      appProject.spec.namespaceResourceWhitelist.withGroup(group)
+      + appProject.spec.namespaceResourceWhitelist.withKind(kind)
+      for group in std.objectFields(previewKinds)
+      for kind in previewKinds[group]
+    ]),
+
+  // The AppProject for the Applications that give `repoURL`'s pull request previews
+  // dev's Secrets and buckets. Their Role and RoleBinding go in the dev namespace.
+  newPreviewAccessProject(repoURL)::
+    local name = appNameOf(repoURL);
+
+    appProject.new('preview-access-frontier-' + name)
+    + appProject.metadata.withNamespace('argocd')
+    + appProject.spec.withDescription('Dev Secrets and buckets for the pull request preview environments of Frontier app %s, registered in frontier-app-registry' % name)
+    + appProject.spec.withSourceRepos([repoURL])
+    + appProject.spec.withDestinations([
+      appProject.spec.destinations.withServer('https://kubernetes.default.svc')
+      + appProject.spec.destinations.withNamespace(namespace)
+      for namespace in ['frontier-%s-dev' % name, 'frontier-%s-dev-pr-*' % name]
+    ])
+    + appProject.spec.withClusterResourceWhitelist(
+      appProject.spec.clusterResourceWhitelist.withGroup('')
+      + appProject.spec.clusterResourceWhitelist.withKind('Namespace')
+    )
+    + appProject.spec.withNamespaceResourceWhitelist([
+      appProject.spec.namespaceResourceWhitelist.withGroup(group)
+      + appProject.spec.namespaceResourceWhitelist.withKind(kind)
+      for group in std.objectFields(previewAccessKinds)
+      for kind in previewAccessKinds[group]
+    ]),
 }
