@@ -1,0 +1,4 @@
+// expect: customDomains need a gateway
+local frontier = import '../../main.libsonnet';
+
+frontier.toList(frontier.new({ appName: 'demo', namespace: 'demo-dev', permissions: { owner: 'owner' } } + { visibility: 'none', customDomains: [{ fqdn: 'a.withpersona.app' }] }))

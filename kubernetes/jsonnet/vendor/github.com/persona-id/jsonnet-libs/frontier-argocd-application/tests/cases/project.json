@@ -1,0 +1,30 @@
+{
+   "apiVersion": "argoproj.io/v1alpha1",
+   "kind": "AppProject",
+   "metadata": {
+      "name": "frontier-my-app",
+      "namespace": "argocd"
+   },
+   "spec": {
+      "clusterResourceWhitelist": [
+         {
+            "group": "",
+            "kind": "Namespace"
+         }
+      ],
+      "description": "Frontier app my-app, registered in frontier-app-registry",
+      "destinations": [
+         {
+            "namespace": "frontier-my-app-dev",
+            "server": "https://kubernetes.default.svc"
+         },
+         {
+            "namespace": "frontier-my-app-prod",
+            "server": "https://kubernetes.default.svc"
+         }
+      ],
+      "sourceRepos": [
+         "https://github.com/persona-id/my-app"
+      ]
+   }
+}

@@ -1,0 +1,63 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: frontier-app
+
+# Local development only. ArgoCD deploys development and production from
+# kubernetes/jsonnet. This builds the image and deploys
+# kubernetes/jsonnet/local/main.jsonnet to a per-developer namespace.
+#
+# Run it through the Makefile (make dev): it renders the jsonnet to
+# .skaffold/app.yaml, which skaffold can't do itself, and fills in the
+# image repository, namespace and kube context variables below with
+# envsubst. make bootstrap, which make dev runs first, creates the namespace.
+#
+# skaffold doesn't watch the jsonnet. After changing it, restart make dev.
+
+# Remote in-cluster kaniko builds
+.build_remote: &build_remote
+  cluster:
+    dockerConfig:
+      secretName: image-builder-secret
+    namespace: image-builder
+  artifacts:
+    - image: ${IMAGE_REPO}
+      kaniko:
+        buildArgs: &source_build_args
+          # `cmd` runs on every build, including watch-mode rebuilds, so the
+          # image's OCI labels name the commit it was built from.
+          SOURCE_REPOSITORY: '{{cmd "sh" "bin/source-provenance" "repository" | trim}}'
+          SOURCE_REVISION: '{{cmd "sh" "bin/source-provenance" "revision" | trim}}'
+        cache:
+          repo: ${IMAGE_REPO}/cache
+
+build:
+  local:
+    useBuildkit: true
+  # Use content-based tags so each rebuild gets a unique tag
+  tagPolicy:
+    inputDigest: {}
+  artifacts:
+    - image: ${IMAGE_REPO}
+      docker:
+        buildArgs: *source_build_args
+
+manifests:
+  # The rendered jsonnet tags the image `skaffold`. skaffold
+  # replaces it with the image it built.
+  rawYaml:
+    - .skaffold/app.yaml
+
+deploy:
+  # Skaffold's status check watches Deployments and friends; a Frontier app
+  # deploys a Knative Service, a custom resource it does not track, so it would
+  # report green on a revision that never serves. `make status` shows the truth.
+  statusCheck: false
+  kubeContext: ${KUBE_CONTEXT}
+  kubectl:
+    defaultNamespace: ${NAMESPACE}
+
+profiles:
+  # Remote in-cluster builds (no local Docker required)
+  - name: dev-remote-build
+    build: *build_remote

@@ -1,0 +1,91 @@
+name: Sync frontier-dev with main
+
+# When main advances (a promotion merged, or a local feature PR landed),
+# open/update a main -> frontier-dev PR so frontier-dev picks up the changes.
+# This never pushes frontier-dev directly — it is only updated when the PR
+# merges, so a conflict just leaves the PR open (fail-safe), never a broken
+# branch. frontier-dev is opt-in: if the branch doesn't exist, this no-ops.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  # Dispatching deploy-dev after the sync merge. See the reconcile step.
+  actions: write
+
+jobs:
+  sync:
+    if: github.repository != 'persona-id/persona-template-frontier-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Open or update main -> frontier-dev PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! git ls-remote --exit-code --heads origin frontier-dev >/dev/null 2>&1; then
+            echo "No frontier-dev branch; nothing to sync."; exit 0
+          fi
+          if git merge-base --is-ancestor origin/main origin/frontier-dev; then
+            echo "frontier-dev already contains main; nothing to sync."; exit 0
+          fi
+          num=$(gh pr list --base frontier-dev --head main --state open --json number --jq '.[0].number')
+          if [ -z "$num" ]; then
+            url=$(gh pr create --base frontier-dev --head main \
+              --title "Sync main into frontier-dev" \
+              --body "Automated. Auto-merges (merge commit) when clean; if it conflicts, resolve here — frontier-dev is untouched until this merges.")
+            num=$(echo "$url" | grep -oE '[0-9]+$')
+          fi
+          echo "Sync PR #$num"
+          # Auto-merge when clean (merge commit, never squash); leave open on conflict.
+          for i in 1 2 3 4 5; do
+            state=$(gh pr view "$num" --json mergeable --jq .mergeable)
+            case "$state" in
+              MERGEABLE) gh pr merge "$num" --merge && { echo "Auto-merged #$num"; exit 0; } ;;
+              CONFLICTING) echo "Conflict — leaving PR #$num open for manual resolution."; exit 0 ;;
+            esac
+            sleep 3
+          done
+          echo "Mergeability still computing — leaving PR #$num open; the next main push will retry."
+
+      # The merge above uses GITHUB_TOKEN, so the push to frontier-dev raises no
+      # event and deploy-dev.yaml never fires. Without this, frontier-dev
+      # advances while the dev environment stays frozen at whatever last
+      # deployed, which is how an app can sit dark for days without anyone
+      # noticing. Same reconcile as dependabot-automerge.yaml does for prod.
+      #
+      # always(), and comparing rather than dispatching unconditionally, so this
+      # also picks up a sync that merged before this step existed, or one whose
+      # dispatch failed. Any run for the sha counts, including failed and
+      # in-progress, so a broken dev deploy is not retried on every main push.
+      - name: Deploy frontier-dev if the last dev deploy is behind it
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          tip=$(gh api "repos/$GH_REPO/branches/frontier-dev" --jq '.commit.sha' 2>/dev/null || true)
+          if [ -z "$tip" ]; then
+            echo "No frontier-dev branch; nothing to deploy."
+            exit 0
+          fi
+
+          # Piped to real jq; `gh api --jq` takes one argument and rejects --arg.
+          seen=$(gh api "repos/$GH_REPO/actions/workflows/deploy-dev.yaml/runs?per_page=100" \
+            | jq --arg sha "$tip" '[.workflow_runs[] | select(.head_sha == $sha)] | length')
+
+          if [ "$seen" -gt 0 ]; then
+            echo "frontier-dev $tip already has a dev deploy run, standing down."
+            exit 0
+          fi
+
+          echo "frontier-dev $tip has no dev deploy run. Dispatching."
+          gh workflow run deploy-dev.yaml --ref frontier-dev -f ref="$tip"

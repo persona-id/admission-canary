@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "dependencies": [
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/argo-cd-libsonnet.git",
+          "subdir": "3.2"
+        }
+      },
+      "version": "674323826e0f173a2f20ec6a094bb21a87f56ce6",
+      "sum": "hLtRQPT1N2L6XLpTv7/NPM+Dot2kI+eE4BDfGeaTsh4="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/docsonnet.git",
+          "subdir": "doc-util"
+        }
+      },
+      "version": "bf6f08ae02a51c48bdcec4629b1c1a5a62c6f803",
+      "sum": "BrAL/k23jq+xy9oA7TWIhUx07dsA/QLm3g7ktCwe//U="
+    }
+  ],
+  "legacyImports": false
+}

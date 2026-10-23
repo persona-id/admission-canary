@@ -1,0 +1,371 @@
+[
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "allow-intra-namespace"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "namespaces": [
+                           "demo-prod"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-s2s"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "paths": [
+                           "/metrics",
+                           "/healthz"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz"
+                        ],
+                        "paths": [
+                           "/admin/*"
+                        ]
+                     }
+                  }
+               ],
+               "when": [
+                  {
+                     "key": "request.auth.claims[groups]",
+                     "values": [
+                        "G"
+                     ]
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz",
+                           "/admin/*"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/knative-serving/sa/activator",
+                           "cluster.local/ns/knative-serving/sa/controller"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+         "labels": {
+            "app": "demo",
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "development",
+            "homestead.withpersona.com/catalog": "prod",
+            "istio.io/rev": "stable",
+            "name": "demo-prod"
+         },
+         "name": "demo-prod"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-crd-access"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-edit"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "serving.knative.dev/v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "knative.withpersona.com/visibility": "private"
+         },
+         "name": "app"
+      },
+      "spec": {
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "autoscaling.knative.dev/minScale": "1",
+                  "autoscaling.knative.dev/target-burst-capacity": "0"
+               },
+               "labels": {
+                  "environment": "production",
+                  "frontier.withpersona.com/custom-denied-message": "true"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "image": "r:t",
+                     "ports": [
+                        {
+                           "containerPort": 8080
+                        }
+                     ]
+                  }
+               ],
+               "serviceAccountName": "app",
+               "timeoutSeconds": 300
+            }
+         },
+         "traffic": [
+            {
+               "latestRevision": true,
+               "percent": 100
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "imagePullSecrets": [
+         {
+            "name": "ghcr-pull-secret"
+         }
+      ],
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "RequestAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-okta-jwt"
+      },
+      "spec": {
+         "jwtRules": [
+            {
+               "forwardOriginalToken": false,
+               "issuer": "https://persona.okta.com",
+               "jwksUri": "https://persona.okta.com/oauth2/v1/keys"
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "rel",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-require-auth"
+      },
+      "spec": {
+         "action": "CUSTOM",
+         "provider": {
+            "name": "oauth2-proxy"
+         },
+         "rules": [
+            {
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz"
+                        ],
+                        "paths": [
+                           "/admin/*"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   }
+]

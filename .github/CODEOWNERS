@@ -1,0 +1,14 @@
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Generally codeowner rules follow most of the same syntax as .gitignore files.
+# The basic structure is a file or path matcher followed by a list of github
+# usernames, email addresses, and/or github teams. It's
+
+# The file is processed top to bottom where more specific matches at the bottom of the
+# file will take precedence over less specific rules at the top of the file.
+
+# Update this rules in this file as needed for your repo
+
+### OWNER RULES
+# Default Catch All Rule
+*                                @persona-id/YOUR_GITHUB_TEAM_NAME

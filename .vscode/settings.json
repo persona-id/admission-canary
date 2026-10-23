@@ -1,0 +1,7 @@
+{
+  "github.copilot.chat.agent.terminal.denyList": {
+    "git push --force": true,
+    "/^t(f|erraform) (apply|destroy|state)/": true,
+    "/^k(ubectl) (apply|delete|edit)/": true
+  }
+}

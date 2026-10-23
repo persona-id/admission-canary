@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "dependencies": [
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/cnrm-libsonnet.git",
+          "subdir": "1.130"
+        }
+      },
+      "version": "953f6b1700d783702102c4468b0f8a2fc6e8f4a4",
+      "sum": "bltlot7dX7GB8ebaq/qYnmYLSsNL1GYumxNF8WUMaEc="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/docsonnet.git",
+          "subdir": "doc-util"
+        }
+      },
+      "version": "bf6f08ae02a51c48bdcec4629b1c1a5a62c6f803",
+      "sum": "BrAL/k23jq+xy9oA7TWIhUx07dsA/QLm3g7ktCwe//U="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/istio-libsonnet.git",
+          "subdir": "1.28"
+        }
+      },
+      "version": "e6ac81a76d3c48162b0db81b3fe65a616b6c7c0c",
+      "sum": "OoCRfWNAnwYrhmiYBF3rv5l3KiB1ffXjFXjo2THKKFk="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/k8s-libsonnet.git",
+          "subdir": "1.34"
+        }
+      },
+      "version": "18e7a26f0699cb8b006494f40b93ddd06d33b299",
+      "sum": "E17cbu3ZmqX9ILxumK2jmu8KlUijg/DME3LaOcPxaX0="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/knative-serving-libsonnet.git",
+          "subdir": "1.17.0"
+        }
+      },
+      "version": "ca534f645553aa732b392a411c24aea6bde63241",
+      "sum": "vOFYHR1EkSq62+2GQYteBMAIPNiz2943o2SntqWgHhI="
+    }
+  ],
+  "legacyImports": false
+}

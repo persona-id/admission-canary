@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "dependencies": [
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/argo-cd-libsonnet.git",
+          "subdir": "3.2"
+        }
+      },
+      "version": "674323826e0f173a2f20ec6a094bb21a87f56ce6",
+      "sum": "hLtRQPT1N2L6XLpTv7/NPM+Dot2kI+eE4BDfGeaTsh4="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/cnrm-libsonnet.git",
+          "subdir": "1.130"
+        }
+      },
+      "version": "953f6b1700d783702102c4468b0f8a2fc6e8f4a4",
+      "sum": "bltlot7dX7GB8ebaq/qYnmYLSsNL1GYumxNF8WUMaEc="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/docsonnet.git",
+          "subdir": "doc-util"
+        }
+      },
+      "version": "bf6f08ae02a51c48bdcec4629b1c1a5a62c6f803",
+      "sum": "BrAL/k23jq+xy9oA7TWIhUx07dsA/QLm3g7ktCwe//U="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/istio-libsonnet.git",
+          "subdir": "1.28"
+        }
+      },
+      "version": "e6ac81a76d3c48162b0db81b3fe65a616b6c7c0c",
+      "sum": "OoCRfWNAnwYrhmiYBF3rv5l3KiB1ffXjFXjo2THKKFk="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/k8s-libsonnet.git",
+          "subdir": "1.34"
+        }
+      },
+      "version": "18e7a26f0699cb8b006494f40b93ddd06d33b299",
+      "sum": "E17cbu3ZmqX9ILxumK2jmu8KlUijg/DME3LaOcPxaX0="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/knative-serving-libsonnet.git",
+          "subdir": "1.17.0"
+        }
+      },
+      "version": "ca534f645553aa732b392a411c24aea6bde63241",
+      "sum": "vOFYHR1EkSq62+2GQYteBMAIPNiz2943o2SntqWgHhI="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/persona-id/jsonnet-libs.git",
+          "subdir": "frontier-app-base"
+        }
+      },
+      "version": "6a1cd8db3bb297e89d21de20dc50d516985ea3d2",
+      "sum": "UuK08RdyJElffmutOq1rsaAgEVyLgc7aakqAtPfP0K4="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/persona-id/jsonnet-libs.git",
+          "subdir": "frontier-argocd-application"
+        }
+      },
+      "version": "fa22601b4d770e58bdcde8d26e3c7753669927c8",
+      "sum": "nqtaWGgy10dMnx5uMAbDyfCF18Xy5QHJMZnXa5ryFC8="
+    }
+  ],
+  "legacyImports": false
+}

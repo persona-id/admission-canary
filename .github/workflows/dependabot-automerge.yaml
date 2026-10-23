@@ -1,0 +1,159 @@
+name: Dependabot automerge
+
+# Approves Dependabot PRs and arms GitHub auto-merge, then makes sure the merge
+# actually reaches production.
+#
+# The required status checks are the only gate. There is deliberately no fallback
+# merge: an unconditional `gh pr merge` is the one path that can land a PR CI has
+# not blessed, and it has already done so. If `--auto` is refused, the repo is
+# missing `allow_auto_merge` and that is the thing to fix.
+#
+# pull_request_target, not pull_request: it runs the definition from the base
+# branch, so a PR cannot edit its own merge conditions. Safe here only because
+# nothing below checks out the head ref.
+#
+# synchronize is a trigger so the approval survives a Dependabot rebase, which
+# dismisses it wherever dismiss_stale_reviews_on_push is set. On that event the
+# pusher must be Dependabot itself, so a human push to a bot branch is never
+# auto-approved.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" on the repo.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  automerge:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+       (github.event.action != 'synchronize' ||
+        github.event.sender.login == 'dependabot[bot]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+
+    steps:
+      - name: Approve and arm auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" = "pull_request_target" ]; then
+            prs="$PR"
+          else
+            prs=$(gh pr list --author "app/dependabot" --state open \
+                    --limit 100 --json number --jq '.[].number')
+          fi
+
+          # One bad PR must not stop the sweep reaching the rest, but a failure
+          # must not read as success either: failures are collected and the step
+          # exits non-zero at the end. An earlier version swallowed them into an
+          # echo, so the job went green while arming nothing.
+          failed=0
+
+          # Derived, not hardcoded: repos differ on which merge methods they
+          # allow (merge-commit only, squash only, or all three), and gh pr merge
+          # fails outright on a method the repo forbids. Merge commit is
+          # preferred because a frontier-dev to main promotion must keep its
+          # ancestry.
+          method=$(gh api "repos/$GH_REPO" --jq \
+            'if .allow_merge_commit then "--merge"
+             elif .allow_squash_merge then "--squash"
+             else "--rebase" end')
+          echo "merge method: $method"
+
+          for pr in $prs; do
+            head=$(gh api "repos/$GH_REPO/pulls/$pr" --jq '.head.sha')
+
+            # Match an existing approval against the current head sha rather than
+            # just its existence: a dismissal racing this run would otherwise make
+            # us skip and leave the PR unapproved.
+            already=$(gh api "repos/$GH_REPO/pulls/$pr/reviews?per_page=100" \
+              | jq --arg sha "$head" '[.[]
+                  | select(.user.login == "github-actions[bot]"
+                           and .state == "APPROVED"
+                           and .commit_id == $sha)] | length')
+            if [ "$already" -eq 0 ]; then
+              if ! gh api --method POST "repos/$GH_REPO/pulls/$pr/reviews" \
+                -f event=APPROVE \
+                -f commit_id="$head" \
+                -f body="Approved automatically: Dependabot dependency update."; then
+                echo "::error::could not approve PR $pr"
+                failed=1
+                continue
+              fi
+            fi
+
+            # A method is required explicitly: `gh pr merge --auto` with none
+            # fails non-interactively with "--merge, --rebase, or --squash
+            # required".
+            if ! arm=$(gh pr merge --auto "$method" "$pr" 2>&1); then
+              # A PR that edits .github/workflows/ cannot be auto-merged by
+              # GITHUB_TOKEN: GitHub refuses with "without `workflows`
+              # permission". That is not grantable here, since `workflows` is not
+              # a valid key in a workflow permissions block; it is an App/OAuth
+              # scope. Dependabot's github-actions bumps are exactly this shape,
+              # so they need a human. Reported, not failed, because it is a
+              # standing platform limit rather than something this run can fix.
+              case "$arm" in
+                *"without \`workflows\` permission"*|*"without 'workflows' permission"*)
+                  echo "::notice::PR $pr edits a workflow file; GITHUB_TOKEN cannot auto-merge it. Needs a human."
+                  ;;
+                *)
+                  echo "::error::could not arm auto-merge on PR $pr: $arm"
+                  failed=1
+                  ;;
+              esac
+            fi
+          done
+
+          [ "$failed" -eq 0 ] || exit 1
+
+      # A merge performed with GITHUB_TOKEN raises no push event that starts a
+      # workflow run, so release.yaml, which is `on: push` to main, never fires
+      # and the bump lands without shipping. workflow_dispatch is an explicit
+      # exception to that rule, so the release is dispatched here.
+      #
+      # This reconciles rather than dispatching straight after the merge above:
+      # `--auto` only arms the merge and GitHub lands it once checks pass, usually
+      # after this run has ended, so an immediate dispatch would deploy the
+      # previous main.
+      - name: Deploy main if the last deploy is behind it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          main=$(gh api "repos/$GH_REPO/branches/main" --jq '.commit.sha')
+
+          # Any run for this sha counts, including a failed or in-progress one.
+          # Filtering to successes would make the hourly schedule retry a broken
+          # deploy every hour, and concurrent runs double-deploy.
+          #
+          # Piped to real jq: `gh api --jq` takes one argument, so passing --arg
+          # to it errors ("accepts 1 arg(s), received 4"). Masking that with
+          # `|| echo 0` made seen always 0, so this dispatched on every run.
+          seen=$(gh api "repos/$GH_REPO/actions/workflows/release.yaml/runs?per_page=100" \
+            | jq --arg sha "$main" '[.workflow_runs[] | select(.head_sha == $sha)] | length')
+
+          if [ "$seen" -gt 0 ]; then
+            echo "main $main already has a release run, standing down."
+            exit 0
+          fi
+
+          echo "main $main has no release run. Dispatching."
+          gh workflow run release.yaml --ref main

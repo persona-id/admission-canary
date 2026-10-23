@@ -1,0 +1,50 @@
+#!/bin/sh
+# Invoked by Skaffold templates on each build/render, not snapshotted by Make.
+# Provenance is best-effort: when a value can't be determined, warn on stderr and
+# print an empty value (which the chart omits) rather than failing the deploy.
+set -u
+
+warn() {
+  echo "source-provenance: $1; recording empty $mode" >&2
+  printf '\n'
+  exit 0
+}
+
+mode=${1:-}
+case "$mode" in
+  repository)
+    # Read the configured URL, not `git remote get-url`: CI's insteadOf rewrite
+    # can embed an installation token in the latter. Never publish credentials.
+    url=$(git config --get remote.origin.url 2>/dev/null) || warn "no origin remote"
+    case "$url" in
+      https://github.com/*|http://github.com/*|ssh://git@github.com/*)
+        path=${url#*github.com/} ;;
+      https://*@github.com/*|http://*@github.com/*)
+        path=${url#*@github.com/} ;;
+      git@github.com:*)
+        path=${url#git@github.com:} ;;
+      *) warn "unsupported origin, expected a GitHub repository URL" ;;
+    esac
+    path=${path%/}
+    path=${path%.git}
+    # Restrict to owner/repository, so URL query strings, tokens and YAML/shell
+    # metacharacters cannot be persisted as deploy metadata.
+    printf '%s\n' "$path" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' ||
+      warn "invalid GitHub repository path"
+    printf 'https://github.com/%s\n' "$path"
+    ;;
+  revision)
+    rev=$(git rev-parse --verify HEAD 2>/dev/null) || warn "cannot read git HEAD"
+    printf '%s\n' "$rev"
+    ;;
+  dirty)
+    status=$(git status --porcelain --untracked-files=normal 2>/dev/null) ||
+      warn "cannot read git status"
+    if [ -n "$status" ]; then
+      printf 'true\n'
+    else
+      printf 'false\n'
+    fi
+    ;;
+  *) echo "Usage: $0 repository|revision|dirty" >&2; exit 1 ;;
+esac

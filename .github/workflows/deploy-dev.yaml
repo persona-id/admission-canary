@@ -1,0 +1,83 @@
+name: Deploy to Dev
+
+# Pushes the image for a frontier-dev commit. The development Application
+# (kubernetes/deploy/development.jsonnet) follows frontier-dev and passes the
+# commit sha it resolved to main.jsonnet as imageTag, so the image is all this
+# workflow has to provide; ArgoCD does the deploy.
+#
+# AI Dev pushes to frontier-dev with an App token, which fires the push trigger.
+# sync-frontier-dev.yaml merges with GITHUB_TOKEN, which raises no push event,
+# so it dispatches this workflow instead and finds runs by this file name.
+#
+# If ArgoCD rolls out a sha before its image exists, Knative keeps serving the
+# previous revision and retries until the image lands.
+on:
+  push:
+    branches:
+      - frontier-dev
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'frontier-dev commit to build'
+        required: false
+        default: 'frontier-dev'
+        type: string
+
+# One build per commit. A newer push doesn't cancel an older build: each sha is
+# a revision ArgoCD may already be trying to run.
+concurrency:
+  group: deploy-dev-${{ github.event.inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  image:
+    if: github.repository != 'persona-id/persona-template-frontier-app'
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://app-frontier-${{ github.event.repository.name }}-dev.private.frontier.withpersona.app
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      # The tag must be the full commit sha ArgoCD resolves, whatever ref was
+      # dispatched.
+      - name: Resolve the commit sha
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The Application only passes the tag. The image repository comes from the
+      # name in kubernetes/jsonnet/common/app.libsonnet, so an image pushed
+      # anywhere else would deploy as an image that doesn't exist.
+      - name: Check the app name matches the repository
+        run: |
+          if ! grep -qF "name: '${GITHUB_REPOSITORY#*/}'," kubernetes/jsonnet/common/app.libsonnet; then
+            echo "::error::name in kubernetes/jsonnet/common/app.libsonnet is not ${GITHUB_REPOSITORY#*/}"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ steps.sha.outputs.sha }}
+          # The OCI source and revision labels (see the Dockerfile).
+          build-args: |
+            SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
+            SOURCE_REVISION=${{ steps.sha.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

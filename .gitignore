@@ -1,0 +1,7 @@
+.worktrees/
+__pycache__/
+
+# Rendered by make render for skaffold
+.skaffold/
+node_modules/
+dist/

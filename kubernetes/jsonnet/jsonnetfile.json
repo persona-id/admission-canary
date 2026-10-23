@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "dependencies": [
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/persona-id/jsonnet-libs.git",
+          "subdir": "frontier-argocd-application"
+        }
+      },
+      "version": "main"
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/persona-id/jsonnet-libs.git",
+          "subdir": "frontier-app-base"
+        }
+      },
+      "version": "main"
+    }
+  ],
+  "legacyImports": true
+}

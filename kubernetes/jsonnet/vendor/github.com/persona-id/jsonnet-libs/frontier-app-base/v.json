@@ -1,0 +1,1 @@
+{"appName": "demo", "image": {"repository": "r", "tag": "t"}, "auth": {"allow": {"groups": ["G"]}}}

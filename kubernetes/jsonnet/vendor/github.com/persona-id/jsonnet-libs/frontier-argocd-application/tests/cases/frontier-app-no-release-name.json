@@ -1,0 +1,46 @@
+{
+   "apiVersion": "argoproj.io/v1alpha1",
+   "kind": "Application",
+   "metadata": {
+      "finalizers": [
+         "resources-finalizer.argocd.argoproj.io"
+      ],
+      "name": "my-app-dev",
+      "namespace": "argocd"
+   },
+   "spec": {
+      "destination": {
+         "namespace": "frontier-my-app-dev",
+         "server": "https://kubernetes.default.svc"
+      },
+      "project": "frontier-my-app",
+      "source": {
+         "directory": {
+            "include": "main.jsonnet",
+            "jsonnet": {
+               "libs": [
+                  "kubernetes/jsonnet/vendor"
+               ],
+               "tlas": [
+                  {
+                     "name": "imageTag",
+                     "value": "$ARGOCD_APP_REVISION"
+                  }
+               ]
+            }
+         },
+         "path": "kubernetes/jsonnet/development",
+         "repoURL": "https://github.com/persona-id/my-app",
+         "targetRevision": "frontier-dev"
+      },
+      "syncPolicy": {
+         "automated": {
+            "prune": true,
+            "selfHeal": true
+         },
+         "syncOptions": [
+            "CreateNamespace=true"
+         ]
+      }
+   }
+}

@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  pull_request:
+    # The base branch, not the head: for pull_request these filters match the
+    # target. sync-frontier-dev.yaml opens a main -> frontier-dev PR on every
+    # push to main and auto-merges it within seconds, so a run scheduled for it
+    # has no merge ref left to resolve and fails at startup with zero jobs.
+    # That is unfixable noise rather than a test failure, and it leaves main
+    # permanently red, which is how a real red stops being noticed. The sync PR
+    # carries commits already tested on main, so skipping it withholds no
+    # signal. Generated repos give frontier-dev no ruleset, so it opens no gate
+    # either; confirm that still holds before relying on it in a repo that has
+    # since added rules there.
+    branches-ignore:
+      - frontier-dev
+  # Not run again on main: its rules require these checks to pass on an
+  # up-to-date branch before a merge, so release.yaml builds without waiting on
+  # a rerun. Do not add a push trigger.
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check for Dockerfile
+        id: check-dockerfile
+        run: |
+          if [ -f Dockerfile ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker image
+        if: steps.check-dockerfile.outputs.exists == 'true'
+        run: docker build -t ${{ github.event.repository.name }}:ci .
+
+  # Checks the deploy contract, then the app's typecheck and unit tests. Change
+  # the app steps if you replace the app, and add your own alongside them. Do not
+  # delete the job: `test` is a required status check, and Dependabot automerge
+  # treats the required checks as its only gate, so a repo without it merges
+  # dependency bumps unverified.
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Matches kubernetes/jsonnet/.tool-versions. Installed with the runner's Go.
+      - name: Install jsonnet
+        run: |
+          go install github.com/google/go-jsonnet/cmd/jsonnet@v0.22.0
+          go install github.com/google/go-jsonnet/cmd/jsonnetfmt@v0.22.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # Asserts the contract the jsonnet and the deploy pipeline rely on. A broken
+      # config fails here rather than halfway through a prod deploy.
+      - name: Deploy contract
+        env:
+          # The name and owner are filled in when Frontier generates a repo from
+          # the template, so the template itself is checked against its own name
+          # and renders with a placeholder owner.
+          IS_TEMPLATE: ${{ github.repository == 'persona-id/persona-template-frontier-app' }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          failures=()
+          common=kubernetes/jsonnet/common/config.libsonnet
+          app=kubernetes/jsonnet/common/app.libsonnet
+
+          # The library refuses to render without an owner. This checkout is
+          # thrown away after the job.
+          if [ "$IS_TEMPLATE" = true ]; then
+            sed -i "s/owner: ''/owner: 'template-ci'/" "$common"
+          fi
+
+          # Everything is named after it, and deploy-dev and release push the
+          # image under the repository's name.
+          if name="$(jsonnet -S -e "(import '$app').name")"; then
+            if [ "$name" != "$REPOSITORY_NAME" ]; then
+              failures+=("$app name is '$name', not the repository's name '$REPOSITORY_NAME'")
+            fi
+          else
+            failures+=("$app does not evaluate")
+          fi
+
+          [ -f Dockerfile ] || failures+=("Dockerfile is missing")
+          yq . skaffold.yaml >/dev/null || failures+=("skaffold.yaml is not valid YAML")
+
+          # Renders each environment the way ArgoCD does, which also runs the
+          # library's validation (required fields, conflicting auth options, ...).
+          # The top-level arguments come from the environment's Application, with
+          # $ARGOCD_APP_REVISION standing for this commit as ArgoCD substitutes
+          # it. main.jsonnet requires imageTag, so an Application that stops
+          # passing it fails the render.
+          revision=$(git rev-parse HEAD)
+          for env in production development; do
+            dir="kubernetes/jsonnet/$env"
+            app="kubernetes/deploy/$env.jsonnet"
+            tla_args=()
+            if [ -f "$app" ]; then
+              if ! app_json="$(jsonnet -J kubernetes/jsonnet/vendor "$app")"; then
+                failures+=("$app does not render")
+                continue
+              fi
+              while IFS=$'\t' read -r code name value; do
+                # The variable's literal text is the pattern being replaced.
+                # shellcheck disable=SC2016
+                value=${value//'${ARGOCD_APP_REVISION}'/$revision}
+                # shellcheck disable=SC2016
+                value=${value//'$ARGOCD_APP_REVISION'/$revision}
+                if [ "$code" = true ]; then kind=code; else kind=str; fi
+                tla_args+=("--tla-$kind" "$name=$value")
+              done < <(jq -r '.spec.source.directory.jsonnet.tlas[]? | [.code // false, .name, .value] | @tsv' <<<"$app_json")
+            else
+              # An environment without an Application. Pass what one would:
+              # this commit's sha as imageTag.
+              tla_args+=(--tla-str "imageTag=$revision")
+            fi
+            if ! jsonnet -J kubernetes/jsonnet/vendor ${tla_args[@]+"${tla_args[@]}"} "$dir/main.jsonnet" >/dev/null; then
+              failures+=("$dir/main.jsonnet does not render")
+            fi
+          done
+
+          if common_json="$(jsonnet "$common")"; then
+            visibility="$(jq -r '.visibility // ""' <<<"$common_json")"
+            if [ "$visibility" != private ] && [ "$visibility" != public ] && [ "$visibility" != none ]; then
+              failures+=("$common visibility must be private, public or none, got '$visibility'")
+            fi
+
+            if ! jq -e '.permissions | type == "object" and has("owner")' <<<"$common_json" >/dev/null; then
+              failures+=("$common is missing permissions.owner")
+            elif [ "$IS_TEMPLATE" != true ] \
+              && ! jq -e '.permissions.owner | type == "string" and (gsub("\\s"; "") != "")' <<<"$common_json" >/dev/null; then
+              failures+=("$common permissions.owner is empty; set it to the owning group")
+            fi
+          else
+            failures+=("$common does not evaluate")
+          fi
+
+          if [ "${#failures[@]}" -gt 0 ]; then
+            printf 'FAIL: %s\n' "${failures[@]}" >&2
+            exit 1
+          fi
+
+      - name: Script contract tests
+        run: python3 -m unittest discover -s tests -v
+
+      # The app's own checks. The Node version matches the Dockerfile's base image.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test

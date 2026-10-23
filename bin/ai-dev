@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# bin/ai-dev — run Claude headless on a prompt, then commit + push to frontier-dev.
+# Executor-agnostic: needs a checked-out repo and git auth (an app token —
+# GITHUB_TOKEN pushes don't trigger workflows).
+#
+# Env: AI_DEV_PROMPT (req) · AI_DEV_AUTHOR · AI_DEV_PLUGIN_DIR (frontier-deploy
+# skill for --plugin-dir; claude -p ignores settings.json plugins) ·
+# AI_DEV_SYSTEM_PROMPT (override coaching) · ANTHROPIC_API_KEY (req) · MAX_TURNS (80)
+set -euo pipefail
+
+PROMPT="${AI_DEV_PROMPT:?AI_DEV_PROMPT is required}"
+AUTHOR="${AI_DEV_AUTHOR:-}"
+MAX_TURNS="${MAX_TURNS:-80}"
+DEV_BRANCH="frontier-dev"
+: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+
+# Install the CLI on demand so the script is self-contained.
+if ! command -v claude >/dev/null 2>&1; then
+  echo "Installing @anthropic-ai/claude-code…"
+  npm install -g @anthropic-ai/claude-code
+fi
+
+git config user.name "Frontier AI Dev"
+git config user.email "frontier-ai-dev@withpersona.com"
+
+# claude -p has no default system prompt, so coach it to act autonomously and
+# make a real change (else it just chats). Override via AI_DEV_SYSTEM_PROMPT.
+SYSTEM_PROMPT="${AI_DEV_SYSTEM_PROMPT:-$(cat <<'EOF'
+You are an autonomous software engineer running non-interactively for a Frontier app
+(Persona's internal Kubernetes app platform). The user's message is a change request:
+they want to SEE the result running in the app's dev environment. Your job is to make a
+concrete, complete change to THIS repository that satisfies it, then stop.
+
+Rules:
+- There is NO human to answer questions. NEVER ask for clarification — make the most
+  reasonable assumption and implement it.
+- If the request is actionable, make a real, complete change — don't just reply with
+  text or examples. If it genuinely can't be done (infeasible, unsafe, or it would
+  break the app), make no change and explain why — don't fabricate a token change.
+- Keep the app working; prefer the smallest change that fulfills the request.
+- Use the frontier-deploy skill for Frontier structure/deploy conventions.
+- Do NOT use git (no commit, push, branch) and do NOT deploy (no make/skaffold/kubectl).
+  Only edit files. The harness commits your changes to `frontier-dev` and deploys them —
+  if you commit/push yourself you create duplicate commits.
+EOF
+)}"
+ALLOWED_TOOLS="Bash,Read,Edit,Write,Grep,Glob,Task,WebFetch,WebSearch,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet"
+# Load the skill via --plugin-dir if the executor cloned one.
+PLUGIN_ARGS=()
+if [[ -n "${AI_DEV_PLUGIN_DIR:-}" && -d "${AI_DEV_PLUGIN_DIR}" ]]; then
+  PLUGIN_ARGS=(--plugin-dir "$AI_DEV_PLUGIN_DIR")
+else
+  echo "Note: AI_DEV_PLUGIN_DIR not set/found — running without the frontier-deploy skill." >&2
+fi
+LOG="$(mktemp)"
+set +e
+claude -p "$PROMPT" \
+  --append-system-prompt "$SYSTEM_PROMPT" \
+  --output-format stream-json --verbose \
+  --allowedTools "$ALLOWED_TOOLS" \
+  ${PLUGIN_ARGS[@]+"${PLUGIN_ARGS[@]}"} \
+  --max-turns "$MAX_TURNS" 2>&1 | tee "$LOG"
+CLAUDE_RC=${PIPESTATUS[0]}
+set -e
+if [[ "$CLAUDE_RC" -ne 0 ]]; then
+  echo "claude exited non-zero ($CLAUDE_RC)" >&2
+  exit "$CLAUDE_RC"
+fi
+
+# Bail on an error result (e.g. error_max_turns) instead of committing. Needs jq.
+RESULT="" SUBTYPE=""
+if command -v jq >/dev/null 2>&1; then
+  RESULT="$(jq -rs 'map(select(.type == "result")) | last | .result // empty' "$LOG" 2>/dev/null || true)"
+  SUBTYPE="$(jq -rs 'map(select(.type == "result")) | last | .subtype // empty' "$LOG" 2>/dev/null || true)"
+fi
+if [[ "$SUBTYPE" == error_* || "$RESULT" == error_max_turns ]]; then
+  echo "Claude run ended with error '${SUBTYPE:-$RESULT}' — not committing." >&2
+  exit 1
+fi
+[[ -n "$RESULT" ]] || RESULT="(no summary captured — see the run log)"
+
+# Don't let the run touch .github/.claude; abort rather than revert.
+if [[ -n "$(git status --porcelain -- .github .claude)" ]]; then
+  echo "Aborting: the run modified .github/ or .claude/, which is not allowed." >&2
+  exit 1
+fi
+
+if [[ -z "$(git status --porcelain)" ]]; then
+  # Full explanation in the run summary; a trimmed line as an annotation the UI reads.
+  echo "No change. $RESULT"
+  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && printf '### AI Dev made no change\n\n%s\n' "$RESULT" >> "$GITHUB_STEP_SUMMARY"
+  NOTE="${RESULT:0:800}"; [[ "${#RESULT}" -gt 800 ]] && NOTE="$NOTE…"
+  echo "::notice title=AI Dev::No change — ${NOTE//$'\n'/%0A}"
+  exit 0
+fi
+
+# Use Claude's own summary as the commit body so the history is descriptive.
+COMMIT_MSG="ai-dev: ${PROMPT:0:60}"$'\n\n'"$RESULT"
+[[ -n "$AUTHOR" ]] && COMMIT_MSG+=$'\n\n'"Requested-by: $AUTHOR"
+git add -A
+git commit -q -m "$COMMIT_MSG"
+
+git push origin "HEAD:$DEV_BRANCH"
+echo "Pushed to $DEV_BRANCH — the push triggers the dev deploy."

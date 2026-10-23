@@ -1,0 +1,76 @@
+name: AI Dev
+
+# Dispatched by the Frontier UI on an AI Dev prompt: bin/ai-dev runs Claude
+# against frontier-dev and pushes.
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "What change to make"
+        required: true
+        type: string
+      author_email:
+        description: "Requester email (recorded in the commit)"
+        required: false
+        type: string
+      dispatch_id:
+        description: "Correlation id (set by the Frontier UI so it can find this run)"
+        required: false
+        type: string
+
+# dispatch_id in the run name lets the UI find this run (dispatch returns no id).
+run-name: AI Dev ${{ inputs.dispatch_id }}
+
+env:
+  # Dedicated least-privilege AI Dev app (persona-frontier-ai-dev, INFR-2848).
+  GH_APP_ID: 3999620
+
+jobs:
+  ai-dev:
+    # Never run on the template itself — only on generated app repos.
+    if: github.repository != 'persona-id/persona-template-frontier-app'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # GITHUB_TOKEN pushes don't trigger workflows — use an app token.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ env.GH_APP_ID }}
+          private-key: ${{ secrets.FRONTIER_AI_DEV_APP_PRIVATE_KEY }}
+          owner: persona-id
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: frontier-dev
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      # Skill loaded via --plugin-dir (claude -p ignores settings.json plugins);
+      # cloned outside the repo so bin/ai-dev's .claude guard doesn't trip.
+      - name: Fetch frontier-deploy skill
+        run: git clone --depth 1 https://github.com/persona-id/frontier-claude-skill.git "$RUNNER_TEMP/frontier-deploy-skill"
+
+      - name: Run AI Dev
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_DEV_PROMPT: ${{ inputs.prompt }}
+          AI_DEV_AUTHOR: ${{ inputs.author_email }}
+          AI_DEV_PLUGIN_DIR: ${{ runner.temp }}/frontier-deploy-skill
+        run: ./bin/ai-dev
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Pushed to \`frontier-dev\`; deploy-dev builds the image and ArgoCD deploys it to:" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://app-frontier-${{ github.event.repository.name }}-dev.private.frontier.withpersona.app" >> "$GITHUB_STEP_SUMMARY"

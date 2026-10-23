@@ -1,0 +1,8 @@
+.git
+.github
+.skaffold
+.worktrees
+node_modules
+dist
+kubernetes
+tests
