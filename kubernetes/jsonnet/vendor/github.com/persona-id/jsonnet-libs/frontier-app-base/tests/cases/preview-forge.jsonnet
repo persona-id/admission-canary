@@ -1,5 +1,4 @@
-// A preview of a dev app with Forge callers and a PodDisruptionBudget, and the
-// FrontierPreview of an app with no secrets or buckets.
+// A preview of a dev app with Forge callers and a PodDisruptionBudget.
 local frontier = import '../../main.libsonnet';
 
 frontier.toList(frontier.preview({

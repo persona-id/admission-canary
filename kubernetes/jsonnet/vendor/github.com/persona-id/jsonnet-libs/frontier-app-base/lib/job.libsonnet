@@ -39,7 +39,6 @@ local h = import 'helpers.libsonnet';
               image: h.appImage(cfg),
               name: 'migration',
             } + h.podContainerMixin(cfg)],
-            initContainers: [h.mysqlProxyContainer(cfg, nativeSidecar=true)],
             nodeSelector: placement.nodeSelector,
             restartPolicy: 'Never',
             serviceAccountName: 'app',

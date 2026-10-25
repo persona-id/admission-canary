@@ -40,6 +40,8 @@ local probes(cfg) =
     + (if source != {} then ksvc.metadata.withAnnotations(source) else {})
     + ksvc.metadata.withLabels(
       h.labels(cfg)
+      // For discovery only; it grants nothing. See `delegatedCallers`.
+      + (if std.member(h.delegatedCallers(cfg), 'forge/persona-cf-app-oracle') then { 'frontier.withpersona.com/oracle-access': 'true' } else {})
       + if cfg.visibility == 'none'
       then { 'networking.knative.dev/visibility': 'cluster-local' }
       else { 'knative.withpersona.com/visibility': cfg.visibility }
@@ -54,7 +56,7 @@ local probes(cfg) =
       + container.withPorts([libs.k.core.v1.containerPort.new(cfg.service.port)])
       + h.podContainerMixin(cfg)
       + probes(cfg),
-    ] + (if cfg.mysql.enabled then [h.mysqlProxyContainer(cfg)] else []))
+    ])
     // Knative drops the node selector and tolerations unless the cluster enables
     // `kubernetes.podspec-nodeselector` and `kubernetes.podspec-tolerations`.
     + (if placement.nodeSelector != {} then ksvc.spec.template.spec.withNodeSelector(placement.nodeSelector) else {})

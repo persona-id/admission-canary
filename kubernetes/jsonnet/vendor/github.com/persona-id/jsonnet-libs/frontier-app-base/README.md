@@ -82,24 +82,44 @@ the label. It returns what `new` returns, with these differences:
 - Everything lands in `<dev namespace>-pr-<prNumber>`, served at
   `app-<that namespace>.<visibility>.frontier.withpersona.app`. `appName` and
   `releaseName` get the same suffix. The Namespace is labelled
-  `frontier.withpersona.com/preview: "true"` and listed in the `dev` catalog.
-- It uses the dev app's data. A `frontierPreview` field holds a `FrontierPreview`
-  that names every Secret the app reads. persona-kubernetes copies those Secrets from
-  the dev namespace under the same names, including `mongo-credentials`, so the
-  preview reads dev's Mongo database. `gcsStorageBuckets` holds an `IAMPolicyMember`
-  per bucket that grants the preview's `app` ServiceAccount the dev app's role on the
-  dev bucket, which must be object viewer, creator or user.
+  `frontier.withpersona.com/preview: "true"` and listed in the `dev` catalog. The
+  Knative Service's `link.argocd.argoproj.io/external-link` annotation holds that
+  URL, which Argo CD shows on the Application and in the pull request comment.
+- It uses the dev app's Secrets, Mongo database and buckets, which `previewAccess`
+  below gives it. `preview` itself renders none of that.
 - Nothing that would duplicate or fight the dev app renders: `sealedSecrets`,
-  `onePasswordItems`, `mongoDatabase`, `mysqlDatabase`, `mysqlMigration` and
-  `domainMappings` are absent, and no bucket or bucket policy of its own renders.
-  MySQL stays disabled. A preview cannot assume the dev database's workload
-  identity, so it gets no Cloud SQL resources, migration, proxy, or `MYSQL_*` settings.
-  The `app` ServiceAccount gets no `gcpServiceAccount` annotation.
+  `onePasswordItems`, `mongoDatabase`, `mysqlDatabase`, `mysqlMigration`,
+  `domainMappings` and `gcsStorageBuckets` are absent, so no bucket or bucket policy
+  of its own renders. MySQL stays disabled. A preview cannot assume the dev
+  database's workload identity, so it gets no Cloud SQL resources, migration, proxy,
+  or `MYSQL_*` settings. The `app` ServiceAccount gets no `gcpServiceAccount`
+  annotation.
 - Valkey and the job queue are the preview's own, so dev workers never run a
   preview's jobs. Workers run, and scheduled jobs are suspended so they don't run
   twice against dev's data.
 - `env` values that contain `app-<dev namespace>.` point at the preview's hostname
   instead, and `FRONTIER_PREVIEW=true` and `FRONTIER_PREVIEW_PR=<prNumber>` are set.
+
+`frontier.previewAccess(config, prNumber)` takes the same development config and
+returns what gives the preview dev's data:
+
+- `gcsStorageBuckets`: an `IAMPolicyMember` per bucket, in the preview's namespace,
+  that grants the preview's `app` ServiceAccount the dev app's role on the dev bucket.
+  The role must be object viewer, creator or user. The reference names the
+  StorageBucket in the dev namespace, so it only resolves to the app's own dev buckets.
+- `devSecrets`, when the app reads any Secret: an External Secrets `ExternalSecret` per
+  Secret the app reads, including its sealed and 1Password items and
+  `mongo-credentials`, which copies the dev namespace's Secret into the preview under
+  the same name. They read through the `SecretStore` `dev-secrets`, which authenticates
+  as the ServiceAccount `dev-secret-reader`. A Role and RoleBinding in the dev
+  namespace, `<preview namespace>-secret-reader`, let that ServiceAccount get exactly
+  those Secrets and no others.
+
+persona-kubernetes deploys `previewAccess` in its own Application, rendered from the
+app's default branch rather than the pull request. A pull request is unreviewed,
+Config Connector applies an `IAMPolicyMember` with project-wide rights, and a
+SecretStore can read whatever its ServiceAccount can. The preview's own AppProject
+allows none of these kinds, so `preview` can't render them.
 
 ## MySQL
 
@@ -126,10 +146,12 @@ The profile is chosen when the instance is first created. Changing it means
 creating a new instance and migrating the data.
 
 The library creates the Cloud SQL instance, database, IAM user and Workload
-Identity binding in the app namespace, and annotates the app ServiceAccount
-with that Google service account. MySQL cannot be combined with
-`gcpServiceAccount.enabled`, because the library must create and grant the same
-identity the workload uses. A preview gets none of these resources.
+Identity binding in the app namespace. Only the `cloud-sql-proxy` ServiceAccount
+is annotated with that Google service account; app pods connect to its Service
+on port 3306. Dev's zonal profile is `db-custom-1-3840`. Production's regional
+HA profile stays `db-custom-2-7680`. Disk autoresize stops at 200 GB. The proxy
+waits 30 seconds after SIGTERM before closing. A preview gets none of these
+resources.
 
 ## Configuration
 
@@ -154,6 +176,48 @@ routes that name it, and `humans` rules never admit one. See
 The `auth` keys are deprecated: when `routes` is empty they are read as the equivalent
 routes, and setting both fails the render. `scaling.minScale` is raised to at least 1,
 since a request through Knative's activator hides who is calling.
+
+### Forge apps acting for a person
+
+`delegatedCallers` (default `[]`, off) lists Forge apps, as `forge/<forge-app>`, that may
+act for a person on the app's `humans: okta` and `humans: anyone` routes, never on
+`humans: none`. It is separate from `principals`: it admits no service calls, and
+`principals` admits no people. The twin of the chart's `delegatedCallers`
+([persona-frontier-base#90](https://github.com/persona-id/persona-frontier-base/pull/90),
+`docs/delegated-callers.md`), with the same claims, headers and sanitizer.
+
+The app's identity-service pass carries the person:
+
+| Claim | Contract (enforced by the identity service) |
+|-------|---------------------------------------------|
+| `sub` | The Forge app, as for every pass |
+| `forge_delegated` | The string `"true"` |
+| `forge_user_email` | The person's email |
+| `forge_user_groups` | Their groups, a list of exact names |
+| `forge_user_groups_csv` | The same groups, comma-joined |
+
+Each delegated rule requires the internal gateway, a pass from a listed app, the
+marker and an email. On an Okta route the email must also end in `@withpersona.com`,
+and with an allowlist match the route's `emails` or a `forge_user_groups` entry in its
+`groups`, either one, as for Okta users. A missing claim refuses the request. Callers
+must use the in-cluster name through the Forge listener; the hostnames still go
+through Okta.
+
+The app receives `x-forge-caller` (`sub`), `x-forge-user-email` (`forge_user_email`)
+and `x-forge-user-groups` (`forge_user_groups_csv`). The Forge VirtualService removes
+those three and the six `x-auth-request-*` identity headers a caller sends, and an
+EnvoyFilter, `app-forge-header-sanitizer`, clears the three Forge headers first on
+every inbound request to the app's sidecar (and the `x-auth-request-*` headers when a
+pass is present), so a caller cannot set them. Browser requests keep oauth2-proxy's
+headers.
+
+The trust boundary is the identity service (`forgeIdentity.issuer`): it validates
+the claims' syntax, types and bounds before signing. An Istio AuthorizationPolicy
+can only match claim values and cannot validate their shape.
+
+Listing `forge/persona-cf-app-oracle` labels the Knative Service (not its revisions)
+`frontier.withpersona.com/oracle-access: "true"`. The label is for discovery only and
+grants nothing.
 
 ### Health checks and disruptions
 
@@ -246,6 +310,9 @@ Options that stand in for things Helm provided:
 - **The bootstrap chart is folded in.** The Namespace and RoleBindings it had kro create
   are rendered here, from the same `permissions` and `homestead` values. The cluster's
   environment, which kro took from its own config, is `clusterEnvironment`.
+- **The Forge VirtualService removes identity headers only with `delegatedCallers`.**
+  The chart removes them on every app with a Forge route; here an app without the
+  opt-in renders exactly as before.
 - The chart's `NOTES.txt`, including its warning when the deprecated `auth` keys are
   set, has no equivalent.
 

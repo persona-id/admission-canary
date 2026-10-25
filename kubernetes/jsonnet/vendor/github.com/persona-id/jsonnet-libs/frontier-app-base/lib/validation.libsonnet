@@ -50,6 +50,10 @@ function(cfg)
        && std.objectHas(cfg[key][handler], 'port')
        && (std.isString(cfg[key][handler].port) || cfg[key][handler].port != cfg.service.port)
   ];
+  local delegatedCallers = std.get(cfg, 'delegatedCallers', []);
+  local isForgeCaller(c) =
+    std.isString(c) && std.startsWith(c, 'forge/') && std.length(c) > std.length('forge/')
+    && std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-', ch) for ch in std.stringChars(std.substr(c, std.length('forge/'), std.length(c)))]);
   local routeErrors = std.flatMap(function(i) checkRoute(i, cfg.routes[i]), std.range(0, std.length(cfg.routes) - 1));
 
   {
@@ -73,6 +77,9 @@ function(cfg)
     assert cfg.routes == [] || !usesAuth :
            'routes replaces auth.required, auth.unauthedPaths, auth.authedPaths and auth.allow; set one or the other.',
     assert routeErrors == [] : routeErrors[0],
+    assert std.isArray(delegatedCallers) : 'delegatedCallers must be a list of forge/<clientId> entries.',
+    assert !std.isArray(delegatedCallers) || std.all([isForgeCaller(c) for c in delegatedCallers]) :
+           'delegatedCallers entries must be forge/<clientId> (lowercase letters, digits and hyphens).',
 
     // The deprecated `auth` keys, checked only when `routes` does not replace them.
     assert cfg.routes != [] || !(auth.unauthedPaths != [] && auth.authedPaths != []) :
@@ -104,8 +111,6 @@ function(cfg)
            'mysql.projectId is required when mysql.enabled is true.',
     assert std.member(['environment-default', 'zonal', 'regional-ha'], cfg.mysql.instance.profile) :
            'mysql.instance.profile must be environment-default, zonal or regional-ha, not "%s".' % cfg.mysql.instance.profile,
-    assert !(cfg.mysql.enabled && cfg.gcpServiceAccount.enabled) :
-           'mysql.enabled cannot be combined with gcpServiceAccount.enabled; MySQL provisions its own workload identity.',
     assert !cfg.mysql.enabled || (std.startsWith(cfg.namespace, 'frontier-') && std.length(cfg.namespace) <= 35) :
            'mysql.enabled requires a frontier-* namespace of at most 35 characters so the generated service account id fits.',
     assert !cfg.mysql.enabled || cfg.mysql.region != '' :

@@ -23,6 +23,14 @@ local operation(rule, route, notHosts=[]) =
 // Whether a route lists callers besides humans.
 local hasCallers(route) = route.frontierApps != [] || route.principals != [];
 
+// Whether callers addressing the in-cluster names skip the Okta login on a route:
+// the callers it lists, and the Forge apps in `delegatedCallers`, use those names.
+local skipsOkta(cfg, route) = hasCallers(route) || h.delegatedCallers(cfg) != [];
+
+// The domain a person's email must have for a Forge app to act for them on an
+// Okta route, as Okta's own users have.
+local corporateEmail = '*@withpersona.com';
+
 // `std.uniq` only drops adjacent repeats; this keeps the first of each.
 local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else acc + [x], xs, []);
 
@@ -52,7 +60,7 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
     // gateway pods for callers without a sidecar.
     local humanRules(route) =
       local claims = if route.humans == 'okta' then { email: route.emails, groups: route.groups } else {};
-      local toPeople = rule.withTo([operation(rule, route, if route.humans == 'okta' && hasCallers(route) then h.inClusterHosts(cfg) else [])]);
+      local toPeople = rule.withTo([operation(rule, route, if route.humans == 'okta' && skipsOkta(cfg, route) then h.inClusterHosts(cfg) else [])]);
       if !humansReach || route.humans == 'none' then []
       // Conditions in one rule are ANDed, so an Okta allowlist is one rule per claim.
       else if std.any([claims[c] != [] for c in std.objectFields(claims)]) then [
@@ -62,6 +70,32 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
         if claims[c] != []
       ]
       else [fromPeople + toPeople];
+
+    // A Forge app in `delegatedCallers` acting for a person: a rule of its own,
+    // never a widening of `principals`. Every rule requires the listed app's pass,
+    // the string marker and the person's email; an Okta route also requires a
+    // corporate email and, with an allowlist, the email or one of the groups,
+    // one rule per claim as for Okta's users. `humans: none` admits no one.
+    local delegatedRules(route) =
+      local callers = h.delegatedCallers(cfg);
+      local claims =
+        if route.humans == 'okta'
+        then [{ forge_user_email: route.emails }, { forge_user_groups: route.groups }]
+        else [];
+      local allowlist = [c for c in claims if c[std.objectFields(c)[0]] != []];
+      local when(extra) = rule.withWhen(
+        [
+          rule.when.withKey('request.auth.claims[forge_delegated]') + rule.when.withValues(['true']),
+          rule.when.withKey('request.auth.claims[forge_user_email]')
+          + rule.when.withValues([if route.humans == 'okta' then corporateEmail else '*']),
+        ]
+        + [rule.when.withKey('request.auth.claims[%s]' % k) + rule.when.withValues(extra[k]) for k in std.objectFields(extra)]
+      );
+      if callers == [] || route.humans == 'none' then []
+      else [
+        fromForge([std.substr(c, std.length('forge/'), std.length(c)) for c in callers]) + to(route) + when(extra)
+        for extra in (if allowlist != [] then allowlist else [{}])
+      ];
 
     // `cluster.local` matches regardless of the mesh's real trust domain, since
     // Istio aliases it. Every Frontier workload runs as `sa/app` in its namespace.
@@ -82,7 +116,7 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
     + authorizationPolicy.spec.selector.withMatchLabels(appSelector)
     + authorizationPolicy.spec.withAction('ALLOW')
     + authorizationPolicy.spec.withRules(
-      std.flatMap(function(route) humanRules(route) + callerRules(route) + forgeRules(route), h.routes(cfg))
+      std.flatMap(function(route) humanRules(route) + delegatedRules(route) + callerRules(route) + forgeRules(route), h.routes(cfg))
       // Denying these leaves the app serving but unable to scale.
       + [from(['cluster.local/ns/knative-serving/sa/activator', 'cluster.local/ns/knative-serving/sa/controller'])]
     ),
@@ -115,7 +149,7 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
     + authorizationPolicy.spec.selector.withMatchLabels(appSelector)
     + authorizationPolicy.spec.withAction('CUSTOM')
     + authorizationPolicy.spec.withRules([
-      rule.withTo([operation(rule, route, if hasCallers(route) then h.inClusterHosts(cfg) else [])])
+      rule.withTo([operation(rule, route, if skipsOkta(cfg, route) then h.inClusterHosts(cfg) else [])])
       for route in h.routes(cfg)
       if route.humans == 'okta'
     ]),

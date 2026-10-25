@@ -1,0 +1,264 @@
+[
+   {
+      "apiVersion": "external-secrets.io/v1",
+      "kind": "ExternalSecret",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "another-secret"
+      },
+      "spec": {
+         "dataFrom": [
+            {
+               "extract": {
+                  "key": "another-secret"
+               }
+            }
+         ],
+         "refreshInterval": "1h",
+         "secretStoreRef": {
+            "kind": "SecretStore",
+            "name": "dev-secrets"
+         },
+         "target": {
+            "creationPolicy": "Owner",
+            "name": "another-secret"
+         }
+      }
+   },
+   {
+      "apiVersion": "external-secrets.io/v1",
+      "kind": "ExternalSecret",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mongo-credentials"
+      },
+      "spec": {
+         "dataFrom": [
+            {
+               "extract": {
+                  "key": "mongo-credentials"
+               }
+            }
+         ],
+         "refreshInterval": "1h",
+         "secretStoreRef": {
+            "kind": "SecretStore",
+            "name": "dev-secrets"
+         },
+         "target": {
+            "creationPolicy": "Owner",
+            "name": "mongo-credentials"
+         }
+      }
+   },
+   {
+      "apiVersion": "external-secrets.io/v1",
+      "kind": "ExternalSecret",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "sealed-one"
+      },
+      "spec": {
+         "dataFrom": [
+            {
+               "extract": {
+                  "key": "sealed-one"
+               }
+            }
+         ],
+         "refreshInterval": "1h",
+         "secretStoreRef": {
+            "kind": "SecretStore",
+            "name": "dev-secrets"
+         },
+         "target": {
+            "creationPolicy": "Owner",
+            "name": "sealed-one"
+         }
+      }
+   },
+   {
+      "apiVersion": "external-secrets.io/v1",
+      "kind": "ExternalSecret",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "some-secret"
+      },
+      "spec": {
+         "dataFrom": [
+            {
+               "extract": {
+                  "key": "some-secret"
+               }
+            }
+         ],
+         "refreshInterval": "1h",
+         "secretStoreRef": {
+            "kind": "SecretStore",
+            "name": "dev-secrets"
+         },
+         "target": {
+            "creationPolicy": "Owner",
+            "name": "some-secret"
+         }
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "frontier-demo-dev-pr-42-secret-reader",
+         "namespace": "frontier-demo-dev"
+      },
+      "rules": [
+         {
+            "apiGroups": [
+               ""
+            ],
+            "resourceNames": [
+               "another-secret",
+               "mongo-credentials",
+               "sealed-one",
+               "some-secret"
+            ],
+            "resources": [
+               "secrets"
+            ],
+            "verbs": [
+               "get"
+            ]
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "frontier-demo-dev-pr-42-secret-reader",
+         "namespace": "frontier-demo-dev"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "Role",
+         "name": "frontier-demo-dev-pr-42-secret-reader"
+      },
+      "subjects": [
+         {
+            "kind": "ServiceAccount",
+            "name": "dev-secret-reader",
+            "namespace": "frontier-demo-dev-pr-42"
+         }
+      ]
+   },
+   {
+      "apiVersion": "external-secrets.io/v1",
+      "kind": "SecretStore",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "dev-secrets"
+      },
+      "spec": {
+         "provider": {
+            "kubernetes": {
+               "auth": {
+                  "serviceAccount": {
+                     "name": "dev-secret-reader"
+                  }
+               },
+               "remoteNamespace": "frontier-demo-dev",
+               "server": {
+                  "caProvider": {
+                     "key": "ca.crt",
+                     "name": "kube-root-ca.crt",
+                     "type": "ConfigMap"
+                  }
+               }
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "dev-secret-reader"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicyMember",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "persona-frontier-foo-bucket"
+      },
+      "spec": {
+         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
+         "resourceRef": {
+            "kind": "StorageBucket",
+            "name": "persona-frontier-foo-bucket",
+            "namespace": "frontier-demo-dev"
+         },
+         "role": "roles/storage.objectUser"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicyMember",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo-dev-pr-42",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "persona-frontier-other"
+      },
+      "spec": {
+         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
+         "resourceRef": {
+            "kind": "StorageBucket",
+            "name": "persona-frontier-other",
+            "namespace": "frontier-demo-dev"
+         },
+         "role": "roles/storage.objectViewer"
+      }
+   }
+]

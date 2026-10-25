@@ -4,8 +4,8 @@ local requestAuthentication = (import 'libs.libsonnet').istio.security.v1.reques
 
 {
   // Verifies the pass the identity service signs for each Forge request. The
-  // audience pins a pass to this app. Rendered only when a route names a Forge app,
-  // so a malformed header never affects other apps.
+  // audience pins a pass to this app. Rendered only when a route names a Forge app
+  // or `delegatedCallers` is set, so a malformed header never affects other apps.
   forge(cfg)::
     requestAuthentication.new('app-forge-identity')
     + requestAuthentication.metadata.withLabels(h.labels(cfg))
@@ -17,7 +17,16 @@ local requestAuthentication = (import 'libs.libsonnet').istio.security.v1.reques
       + requestAuthentication.spec.jwtRules.withIssuer(cfg.forgeIdentity.issuer)
       + requestAuthentication.spec.jwtRules.withJwks(cfg.forgeIdentity.jwks)
       // Envoy removes a caller-sent x-forge-caller and sets it only from a verified pass.
-      + requestAuthentication.spec.jwtRules.withOutputClaimToHeaders([{ header: 'x-forge-caller', claim: 'sub' }]),
+      // With `delegatedCallers`, the forge-header-sanitizer EnvoyFilter also clears
+      // all three headers first, so one stays absent when its claim is missing.
+      // `forge_user_groups`, a list, is never mapped: the CSV claim carries it.
+      + requestAuthentication.spec.jwtRules.withOutputClaimToHeaders(
+        [{ header: 'x-forge-caller', claim: 'sub' }]
+        + (if h.delegatedCallers(cfg) != [] then [
+             { header: 'x-forge-user-email', claim: 'forge_user_email' },
+             { header: 'x-forge-user-groups', claim: 'forge_user_groups_csv' },
+           ] else [])
+      ),
     ]),
 
   // Verifies the Okta ID token oauth2-proxy forwards as `Authorization: Bearer`.

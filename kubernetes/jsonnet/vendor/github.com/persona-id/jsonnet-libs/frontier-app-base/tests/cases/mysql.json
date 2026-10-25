@@ -246,7 +246,7 @@
                   }
                ],
                "restartPolicy": "Never",
-               "serviceAccountName": "app"
+               "serviceAccountName": "cloud-sql-proxy"
             }
          }
       }
@@ -269,7 +269,7 @@
          "bindings": [
             {
                "members": [
-                  "serviceAccount:persona-frontier-staging.svc.id.goog[frontier-persona-billing-prod/app]"
+                  "serviceAccount:persona-frontier-staging.svc.id.goog[frontier-persona-billing-prod/cloud-sql-proxy]"
                ],
                "role": "roles/iam.workloadIdentityUser"
             }
@@ -326,7 +326,7 @@
             ],
             "deletionProtectionEnabled": true,
             "diskAutoresize": true,
-            "diskAutoresizeLimit": 0,
+            "diskAutoresizeLimit": 200,
             "diskSize": 100,
             "diskType": "PD_SSD",
             "edition": "ENTERPRISE",
@@ -368,7 +368,7 @@
                "containers": [
                   {
                      "args": [
-                        "set -eu\napi=\"https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}\"\ntoken=\"$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\"\nca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\nauth=\"Authorization: Bearer ${token}\"\nsecret_url=\"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets/${SECRET_NAME}\"\nif curl --fail --silent --show-error --cacert \"${ca}\" --header \"${auth}\" --output /dev/null \"${secret_url}\"; then\n  exit 0\nfi\npassword=\"$(head -c 48 /dev/urandom | base64 | tr -d '\\n' | head -c 48)\"\nencoded_password=\"$(printf %s \"${password}\" | base64 | tr -d '\\n')\"\nbody=\"$(printf '{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"%s\",\"namespace\":\"%s\"},\"type\":\"Opaque\",\"data\":{\"password\":\"%s\"}}' \"${SECRET_NAME}\" \"${SECRET_NAMESPACE}\" \"${encoded_password}\")\"\ncurl --fail --silent --show-error --cacert \"${ca}\" --header \"${auth}\" --header \"Content-Type: application/json\" --data \"${body}\" \"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets\"\n"
+                        "set -eu\napi=\"https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}\"\ntoken=\"$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\"\nca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\nexport SSL_CERT_FILE=\"${ca}\"\nauth=\"Authorization: Bearer ${token}\"\nsecret_url=\"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets/${SECRET_NAME}\"\nif wget -q --header=\"${auth}\" -O /dev/null \"${secret_url}\"; then\n  exit 0\nfi\npassword=\"$(head -c 48 /dev/urandom | base64 | tr -d '\\n' | head -c 48)\"\nencoded_password=\"$(printf %s \"${password}\" | base64 | tr -d '\\n')\"\nbody=\"$(printf '{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"%s\",\"namespace\":\"%s\"},\"type\":\"Opaque\",\"data\":{\"password\":\"%s\"}}' \"${SECRET_NAME}\" \"${SECRET_NAMESPACE}\" \"${encoded_password}\")\"\nwget -q --header=\"${auth}\" --header=\"Content-Type: application/json\" --post-data=\"${body}\" -O /dev/null \"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets\"\n"
                      ],
                      "command": [
                         "/bin/sh",
@@ -384,7 +384,7 @@
                            "value": "frontier-persona-billing-prod"
                         }
                      ],
-                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/curlimages/curl@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6",
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b",
                      "name": "generate",
                      "securityContext": {
                         "allowPrivilegeEscalation": false
@@ -426,6 +426,147 @@
             }
          },
          "resourceID": "mysql-provisioner"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "persona-billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "replicas": 2,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
+            }
+         },
+         "template": {
+            "metadata": {
+               "labels": {
+                  "app.kubernetes.io/instance": "persona-billing-prod",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "frontier.withpersona.com/workload": "cloud-sql-proxy"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "args": [
+                        "--auto-iam-authn",
+                        "--address=0.0.0.0",
+                        "--health-check",
+                        "--http-address=0.0.0.0",
+                        "--http-port=9091",
+                        "--max-sigterm-delay=30s",
+                        "--private-ip",
+                        "--structured-logs",
+                        "--port=3306",
+                        "$(INSTANCE_CONNECTION_NAME)"
+                     ],
+                     "env": [
+                        {
+                           "name": "INSTANCE_CONNECTION_NAME",
+                           "valueFrom": {
+                              "configMapKeyRef": {
+                                 "key": "instanceConnectionName",
+                                 "name": "mysql-connection"
+                              }
+                           }
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
+                     "livenessProbe": {
+                        "httpGet": {
+                           "path": "/liveness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "name": "cloud-sql-proxy",
+                     "readinessProbe": {
+                        "httpGet": {
+                           "path": "/readiness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "resources": {
+                        "limits": {
+                           "cpu": "160m",
+                           "memory": "64Mi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "32Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "runAsNonRoot": true
+                     },
+                     "startupProbe": {
+                        "failureThreshold": 30,
+                        "httpGet": {
+                           "path": "/startup",
+                           "port": 9091
+                        },
+                        "periodSeconds": 1,
+                        "timeoutSeconds": 5
+                     }
+                  }
+               ],
+               "serviceAccountName": "cloud-sql-proxy",
+               "terminationGracePeriodSeconds": 45
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "persona-billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "mysql",
+               "port": 3306,
+               "targetPort": 3306
+            }
+         ],
+         "selector": {
+            "frontier.withpersona.com/workload": "cloud-sql-proxy"
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+         "annotations": {
+            "iam.gke.io/gcp-service-account": "app-persona-billing-prod@persona-frontier-staging.iam.gserviceaccount.com"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "persona-billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
       }
    },
    {
@@ -610,7 +751,7 @@
                         },
                         {
                            "name": "MYSQL_HOST",
-                           "value": "127.0.0.1"
+                           "value": "cloud-sql-proxy"
                         },
                         {
                            "name": "MYSQL_PORT",
@@ -628,65 +769,6 @@
                      ],
                      "image": ":",
                      "name": "migration"
-                  }
-               ],
-               "initContainers": [
-                  {
-                     "args": [
-                        "--auto-iam-authn",
-                        "--health-check",
-                        "--http-address=0.0.0.0",
-                        "--http-port=9091",
-                        "--private-ip",
-                        "--structured-logs",
-                        "--port=3306",
-                        "$(INSTANCE_CONNECTION_NAME)"
-                     ],
-                     "env": [
-                        {
-                           "name": "INSTANCE_CONNECTION_NAME",
-                           "valueFrom": {
-                              "configMapKeyRef": {
-                                 "key": "instanceConnectionName",
-                                 "name": "mysql-connection"
-                              }
-                           }
-                        }
-                     ],
-                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
-                     "livenessProbe": {
-                        "httpGet": {
-                           "path": "/liveness",
-                           "port": 9091
-                        },
-                        "periodSeconds": 10,
-                        "timeoutSeconds": 5
-                     },
-                     "name": "cloud-sql-proxy",
-                     "resources": {
-                        "limits": {
-                           "cpu": "160m",
-                           "memory": "64Mi"
-                        },
-                        "requests": {
-                           "cpu": "100m",
-                           "memory": "32Mi"
-                        }
-                     },
-                     "restartPolicy": "Always",
-                     "securityContext": {
-                        "allowPrivilegeEscalation": false,
-                        "runAsNonRoot": true
-                     },
-                     "startupProbe": {
-                        "failureThreshold": 30,
-                        "httpGet": {
-                           "path": "/startup",
-                           "port": 9091
-                        },
-                        "periodSeconds": 1,
-                        "timeoutSeconds": 5
-                     }
                   }
                ],
                "nodeSelector": {
@@ -856,7 +938,7 @@
                               },
                               {
                                  "name": "MYSQL_HOST",
-                                 "value": "127.0.0.1"
+                                 "value": "cloud-sql-proxy"
                               },
                               {
                                  "name": "MYSQL_PORT",
@@ -882,65 +964,6 @@
                                  "cpu": "100m",
                                  "memory": "256Mi"
                               }
-                           }
-                        }
-                     ],
-                     "initContainers": [
-                        {
-                           "args": [
-                              "--auto-iam-authn",
-                              "--health-check",
-                              "--http-address=0.0.0.0",
-                              "--http-port=9091",
-                              "--private-ip",
-                              "--structured-logs",
-                              "--port=3306",
-                              "$(INSTANCE_CONNECTION_NAME)"
-                           ],
-                           "env": [
-                              {
-                                 "name": "INSTANCE_CONNECTION_NAME",
-                                 "valueFrom": {
-                                    "configMapKeyRef": {
-                                       "key": "instanceConnectionName",
-                                       "name": "mysql-connection"
-                                    }
-                                 }
-                              }
-                           ],
-                           "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
-                           "livenessProbe": {
-                              "httpGet": {
-                                 "path": "/liveness",
-                                 "port": 9091
-                              },
-                              "periodSeconds": 10,
-                              "timeoutSeconds": 5
-                           },
-                           "name": "cloud-sql-proxy",
-                           "resources": {
-                              "limits": {
-                                 "cpu": "160m",
-                                 "memory": "64Mi"
-                              },
-                              "requests": {
-                                 "cpu": "100m",
-                                 "memory": "32Mi"
-                              }
-                           },
-                           "restartPolicy": "Always",
-                           "securityContext": {
-                              "allowPrivilegeEscalation": false,
-                              "runAsNonRoot": true
-                           },
-                           "startupProbe": {
-                              "failureThreshold": 30,
-                              "httpGet": {
-                                 "path": "/startup",
-                                 "port": 9091
-                              },
-                              "periodSeconds": 1,
-                              "timeoutSeconds": 5
                            }
                         }
                      ],
@@ -1007,7 +1030,7 @@
                         },
                         {
                            "name": "MYSQL_HOST",
-                           "value": "127.0.0.1"
+                           "value": "cloud-sql-proxy"
                         },
                         {
                            "name": "MYSQL_PORT",
@@ -1029,45 +1052,6 @@
                            "containerPort": 8080
                         }
                      ]
-                  },
-                  {
-                     "args": [
-                        "--auto-iam-authn",
-                        "--health-check",
-                        "--http-address=0.0.0.0",
-                        "--http-port=9091",
-                        "--private-ip",
-                        "--structured-logs",
-                        "--port=3306",
-                        "$(INSTANCE_CONNECTION_NAME)"
-                     ],
-                     "env": [
-                        {
-                           "name": "INSTANCE_CONNECTION_NAME",
-                           "valueFrom": {
-                              "configMapKeyRef": {
-                                 "key": "instanceConnectionName",
-                                 "name": "mysql-connection"
-                              }
-                           }
-                        }
-                     ],
-                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
-                     "name": "cloud-sql-proxy",
-                     "resources": {
-                        "limits": {
-                           "cpu": "160m",
-                           "memory": "64Mi"
-                        },
-                        "requests": {
-                           "cpu": "100m",
-                           "memory": "32Mi"
-                        }
-                     },
-                     "securityContext": {
-                        "allowPrivilegeEscalation": false,
-                        "runAsNonRoot": true
-                     }
                   }
                ],
                "nodeSelector": {
@@ -1102,9 +1086,6 @@
       ],
       "kind": "ServiceAccount",
       "metadata": {
-         "annotations": {
-            "iam.gke.io/gcp-service-account": "app-persona-billing-prod@persona-frontier-staging.iam.gserviceaccount.com"
-         },
          "labels": {
             "app.kubernetes.io/instance": "persona-billing-prod",
             "app.kubernetes.io/managed-by": "tanka",
@@ -1167,7 +1148,7 @@
                         },
                         {
                            "name": "MYSQL_HOST",
-                           "value": "127.0.0.1"
+                           "value": "cloud-sql-proxy"
                         },
                         {
                            "name": "MYSQL_PORT",
@@ -1193,65 +1174,6 @@
                            "cpu": "100m",
                            "memory": "256Mi"
                         }
-                     }
-                  }
-               ],
-               "initContainers": [
-                  {
-                     "args": [
-                        "--auto-iam-authn",
-                        "--health-check",
-                        "--http-address=0.0.0.0",
-                        "--http-port=9091",
-                        "--private-ip",
-                        "--structured-logs",
-                        "--port=3306",
-                        "$(INSTANCE_CONNECTION_NAME)"
-                     ],
-                     "env": [
-                        {
-                           "name": "INSTANCE_CONNECTION_NAME",
-                           "valueFrom": {
-                              "configMapKeyRef": {
-                                 "key": "instanceConnectionName",
-                                 "name": "mysql-connection"
-                              }
-                           }
-                        }
-                     ],
-                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
-                     "livenessProbe": {
-                        "httpGet": {
-                           "path": "/liveness",
-                           "port": 9091
-                        },
-                        "periodSeconds": 10,
-                        "timeoutSeconds": 5
-                     },
-                     "name": "cloud-sql-proxy",
-                     "resources": {
-                        "limits": {
-                           "cpu": "160m",
-                           "memory": "64Mi"
-                        },
-                        "requests": {
-                           "cpu": "100m",
-                           "memory": "32Mi"
-                        }
-                     },
-                     "restartPolicy": "Always",
-                     "securityContext": {
-                        "allowPrivilegeEscalation": false,
-                        "runAsNonRoot": true
-                     },
-                     "startupProbe": {
-                        "failureThreshold": 30,
-                        "httpGet": {
-                           "path": "/startup",
-                           "port": 9091
-                        },
-                        "periodSeconds": 1,
-                        "timeoutSeconds": 5
                      }
                   }
                ],

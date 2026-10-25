@@ -192,69 +192,6 @@
       }
    },
    {
-      "apiVersion": "frontier.withpersona.com/v1alpha1",
-      "kind": "FrontierPreview",
-      "metadata": {
-         "labels": {
-            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
-            "app.kubernetes.io/managed-by": "tanka",
-            "app.kubernetes.io/name": "frontier-app-base"
-         },
-         "name": "preview"
-      },
-      "spec": {
-         "secrets": [
-            "another-secret",
-            "mongo-credentials",
-            "sealed-one",
-            "sealed-two",
-            "some-secret"
-         ]
-      }
-   },
-   {
-      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
-      "kind": "IAMPolicyMember",
-      "metadata": {
-         "labels": {
-            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
-            "app.kubernetes.io/managed-by": "tanka",
-            "app.kubernetes.io/name": "frontier-app-base"
-         },
-         "name": "persona-frontier-foo-bucket"
-      },
-      "spec": {
-         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
-         "resourceRef": {
-            "kind": "StorageBucket",
-            "name": "persona-frontier-foo-bucket",
-            "namespace": "frontier-demo-dev"
-         },
-         "role": "roles/storage.objectUser"
-      }
-   },
-   {
-      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
-      "kind": "IAMPolicyMember",
-      "metadata": {
-         "labels": {
-            "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
-            "app.kubernetes.io/managed-by": "tanka",
-            "app.kubernetes.io/name": "frontier-app-base"
-         },
-         "name": "persona-frontier-other"
-      },
-      "spec": {
-         "member": "principal://iam.googleapis.com/projects/1081356511525/locations/global/workloadIdentityPools/persona-frontier.svc.id.goog/subject/ns/frontier-demo-dev-pr-42/sa/app",
-         "resourceRef": {
-            "kind": "StorageBucket",
-            "name": "persona-frontier-other",
-            "namespace": "frontier-demo-dev"
-         },
-         "role": "roles/storage.objectViewer"
-      }
-   },
-   {
       "apiVersion": "security.istio.io/v1beta1",
       "kind": "AuthorizationPolicy",
       "metadata": {
@@ -925,6 +862,9 @@
       "apiVersion": "serving.knative.dev/v1",
       "kind": "Service",
       "metadata": {
+         "annotations": {
+            "link.argocd.argoproj.io/external-link": "https://app-frontier-demo-dev-pr-42.public.frontier.withpersona.app"
+         },
          "labels": {
             "app.kubernetes.io/instance": "frontier-demo-dev-pr-42",
             "app.kubernetes.io/managed-by": "tanka",

@@ -32,6 +32,9 @@ local sizes = {
   // every workload runs as.
   appPrincipal(cfg):: 'cluster.local/ns/%s/sa/app' % cfg.namespace,
 
+  // Follows Knative's config-domain on frontier-us-central1.
+  appURL(cfg):: 'https://app-%s.%s.frontier.withpersona.app' % [cfg.namespace, cfg.visibility],
+
   // Cloud IAM service account IDs are limited to 30 characters. Keep both ends
   // when truncating so environment/user suffixes remain distinct. Enabled MySQL
   // namespaces are at most 35 characters, so the untruncated form is the one
@@ -43,15 +46,24 @@ local sizes = {
     if std.length(app) <= 26 then accountPrefix + app
     else '%s%s-%s' % [accountPrefix, std.substr(app, 0, 17), std.substr(app, std.length(app) - 8, 8)],
 
-  mysqlProxyContainer(cfg, nativeSidecar=false)::
+  // In-namespace Service the app connects to. The proxy pod is the only one
+  // that runs as the MySQL Google service account.
+  mysqlProxyService: 'cloud-sql-proxy',
+
+  // Its own pod, reached through the cloud-sql-proxy Service.
+  mysqlProxyContainer(cfg)::
     {
       name: 'cloud-sql-proxy',
       image: cfg.mysql.proxy.image,
       args: [
         '--auto-iam-authn',
+        // Default binds the database listener to 127.0.0.1, unreachable
+        // through the Service from another pod.
+        '--address=0.0.0.0',
         '--health-check',
         '--http-address=0.0.0.0',
         '--http-port=9091',
+        '--max-sigterm-delay=%s' % cfg.mysql.proxy.maxSigtermDelay,
         '--private-ip',
         '--structured-logs',
         '--port=%d' % cfg.mysql.proxy.port,
@@ -70,33 +82,41 @@ local sizes = {
         limits: { cpu: '160m', memory: '64Mi' },
         requests: { cpu: '100m', memory: '32Mi' },
       },
+      livenessProbe: {
+        httpGet: { path: '/liveness', port: 9091 },
+        periodSeconds: 10,
+        timeoutSeconds: 5,
+      },
+      readinessProbe: {
+        httpGet: { path: '/readiness', port: 9091 },
+        periodSeconds: 10,
+        timeoutSeconds: 5,
+      },
       securityContext: {
         allowPrivilegeEscalation: false,
         runAsNonRoot: true,
       },
-    }
-    // Knative rejects probes on a sidecar unless multi-container probing is on.
-    // A native sidecar's startup probe holds the main container until the proxy is up.
-    + (if nativeSidecar then {
-         livenessProbe: {
-           httpGet: { path: '/liveness', port: 9091 },
-           periodSeconds: 10,
-           timeoutSeconds: 5,
-         },
-         restartPolicy: 'Always',
-         startupProbe: {
-           failureThreshold: 30,
-           httpGet: { path: '/startup', port: 9091 },
-           periodSeconds: 1,
-           timeoutSeconds: 5,
-         },
-       } else {}),
+      startupProbe: {
+        failureThreshold: 30,
+        httpGet: { path: '/startup', port: 9091 },
+        periodSeconds: 1,
+        timeoutSeconds: 5,
+      },
+    },
 
   // A `gcsStorageBuckets` entry's role for the app.
   bucketAppRole(item):: $.get(item, 'appPermissions', 'roles/storage.objectUser'),
 
   // A `gcsStorageBuckets` entry's bucket name, shared by its StorageBucket and IAMPartialPolicy.
   bucketName(item):: 'persona-frontier-%s' % $.normalize(item.name),
+
+  // `delegatedCallers` without repeats, keeping the first of each. Anything not a
+  // list of strings is left to validation.libsonnet to reject.
+  delegatedCallers(cfg)::
+    local v = std.get(cfg, 'delegatedCallers', []);
+    if std.isArray(v)
+    then std.foldl(function(acc, c) if !std.isString(c) || std.member(acc, c) then acc else acc + [c], v, [])
+    else [],
 
   // Every env var a workload gets, in precedence order — later entries win.
   envEntries(cfg, extra=[])::
@@ -124,7 +144,7 @@ local sizes = {
            name: 'MYSQL_DATABASE',
            valueFrom: { configMapKeyRef: { key: 'database', name: 'mysql-connection' } },
          },
-         envVar.new('MYSQL_HOST', '127.0.0.1'),
+         envVar.new('MYSQL_HOST', $.mysqlProxyService),
          envVar.new('MYSQL_PORT', std.toString(cfg.mysql.proxy.port)),
          {
            name: 'MYSQL_USER',
@@ -216,6 +236,10 @@ local sizes = {
       for t in cfg.serviceAccountTokens
     ],
 
+  previewSecretReader:: 'dev-secret-reader',
+  previewSecretReaderRole(cfg):: '%s-secret-reader' % cfg.namespace,
+  previewSecretStore:: 'dev-secrets',
+
   queueClientVars:: queueClientVars,
 
   releaseName(cfg):: $.get(cfg, 'releaseName', cfg.appName),
@@ -273,6 +297,17 @@ local sizes = {
       }
       for i in std.range(0, std.length(filled) - 1)
     ],
+
+  // Every Secret the app's workloads read: its sealed and 1Password items, the ones
+  // its env vars and mounts name, and Mongo's credentials.
+  secretNames(cfg)::
+    local sources = cfg.secrets.sources;
+    local resolved = $.resolvedSecrets(cfg);
+    std.set(
+      [$.normalize(item.name) for item in sources.sealedSecrets.items + sources.onePassword.items]
+      + [$.normalize(s.fromSecretName) for s in resolved.envVars + resolved.mounts]
+      + (if cfg.mongo.enabled then ['mongo-credentials'] else [])
+    ),
 
   // Whether a route limits Okta users to emails or groups, which needs the ID
   // token verified.

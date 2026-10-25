@@ -17,7 +17,7 @@ local mysqlIdentityCfg = cfg {
   metadata: { name: 'mysql-identity-test' },
   data: {
     generatedIdentity:
-      serviceAccount.app(mysqlIdentityCfg).metadata.annotations['iam.gke.io/gcp-service-account'],
+      serviceAccount.mysqlProxy(mysqlIdentityCfg).metadata.annotations['iam.gke.io/gcp-service-account'],
     longName:
       h.mysqlAccountId(cfg {
         namespace: 'frontier-abcdefghijklmnopqrstuvwxyz-prod',

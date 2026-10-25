@@ -98,7 +98,6 @@ local volumeMount = k.core.v1.volumeMount;
     + (if podAnnotations != {} then deployment.spec.template.metadata.withAnnotations(podAnnotations) else {})
     + deployment.spec.template.metadata.withLabels(h.workloadLabels(cfg, worker, 'worker', name))
     + (if placement.nodeSelector != {} then deployment.spec.template.spec.withNodeSelector(placement.nodeSelector) else {})
-    + (if cfg.mysql.enabled then { spec+: { template+: { spec+: { initContainers: [h.mysqlProxyContainer(cfg, nativeSidecar=true)] } } } } else {})
     + deployment.spec.template.spec.withServiceAccountName('app')
     // Time a worker gets to finish the job in hand after SIGTERM.
     + deployment.spec.template.spec.withTerminationGracePeriodSeconds(h.get(worker, 'terminationGracePeriodSeconds', 30))

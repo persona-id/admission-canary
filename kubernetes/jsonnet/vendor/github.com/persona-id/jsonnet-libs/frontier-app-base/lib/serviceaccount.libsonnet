@@ -1,4 +1,5 @@
-// ServiceAccounts: `app`, which every workload runs as, and one per Valkey instance.
+// ServiceAccounts: `app`, which every workload runs as, one per Valkey instance, and a
+// preview's secret reader.
 local h = import 'helpers.libsonnet';
 local serviceAccount = (import 'libs.libsonnet').k.core.v1.serviceAccount;
 
@@ -13,14 +14,24 @@ local serviceAccount = (import 'libs.libsonnet').k.core.v1.serviceAccount;
           'iam.gke.io/gcp-service-account':
             h.get(cfg.gcpServiceAccount, 'email', '%s@persona-frontier.iam.gserviceaccount.com' % cfg.appName),
         })
-      else if cfg.mysql.enabled then
-        serviceAccount.metadata.withAnnotations({
-          'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountId(cfg), cfg.mysql.projectId],
-        })
       else {}
     )
     + serviceAccount.metadata.withLabels(h.labels(cfg))
     + serviceAccount.withImagePullSecrets([{ name: 'ghcr-pull-secret' }]),
+
+  // The Cloud SQL proxy's identity. Workload Identity is the pod's ServiceAccount,
+  // so this has to be a different pod from the app or the app would hold the same
+  // Google service account.
+  mysqlProxy(cfg)::
+    serviceAccount.new(h.mysqlProxyService)
+    + serviceAccount.metadata.withAnnotations({
+      'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountId(cfg), cfg.mysql.projectId],
+    })
+    + serviceAccount.metadata.withLabels(h.labels(cfg)),
+
+  previewSecretReader(cfg)::
+    serviceAccount.new(h.previewSecretReader)
+    + serviceAccount.metadata.withLabels(h.labels(cfg)),
 
   valkey(cfg, instance)::
     serviceAccount.new(instance.name)

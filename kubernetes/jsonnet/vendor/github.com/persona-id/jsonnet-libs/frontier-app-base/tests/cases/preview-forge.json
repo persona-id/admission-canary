@@ -217,21 +217,6 @@
       }
    },
    {
-      "apiVersion": "frontier.withpersona.com/v1alpha1",
-      "kind": "FrontierPreview",
-      "metadata": {
-         "labels": {
-            "app.kubernetes.io/instance": "demo-dev-pr-7",
-            "app.kubernetes.io/managed-by": "tanka",
-            "app.kubernetes.io/name": "frontier-app-base"
-         },
-         "name": "preview"
-      },
-      "spec": {
-         "secrets": [ ]
-      }
-   },
-   {
       "apiVersion": "v1",
       "kind": "Namespace",
       "metadata": {
@@ -343,6 +328,9 @@
       "apiVersion": "serving.knative.dev/v1",
       "kind": "Service",
       "metadata": {
+         "annotations": {
+            "link.argocd.argoproj.io/external-link": "https://app-frontier-demo-dev-pr-7.private.frontier.withpersona.app"
+         },
          "labels": {
             "app.kubernetes.io/instance": "demo-dev-pr-7",
             "app.kubernetes.io/managed-by": "tanka",

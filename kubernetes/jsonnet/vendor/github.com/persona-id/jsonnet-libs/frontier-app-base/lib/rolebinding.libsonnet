@@ -1,6 +1,7 @@
 // RoleBindings that let people manage the app's namespace: its owner and each
 // collaborator get the built-in `edit` ClusterRole, plus `frontier-namespace-owner`
-// (defined in persona-kubernetes) for the kinds `edit` leaves out.
+// (defined in persona-kubernetes) for the kinds `edit` leaves out. A preview's secret
+// reader is bound in the dev namespace too.
 local h = import 'helpers.libsonnet';
 local k = (import 'libs.libsonnet').k;
 
@@ -26,4 +27,17 @@ local bind(cfg, name, clusterRole, user) =
   collaboratorEdit(cfg, user):: bind(cfg, 'collaborator-edit-%s' % user, 'edit', user),
   collaboratorCrdAccess(cfg, user)::
     bind(cfg, 'collaborator-crd-access-%s' % user, 'frontier-namespace-owner', user),
+
+  previewSecretReader(cfg, devNamespace)::
+    roleBinding.new(h.previewSecretReaderRole(cfg))
+    + roleBinding.metadata.withNamespace(devNamespace)
+    + roleBinding.metadata.withLabels(h.labels(cfg))
+    + roleBinding.roleRef.withApiGroup('rbac.authorization.k8s.io')
+    + roleBinding.roleRef.withKind('Role')
+    + roleBinding.roleRef.withName(h.previewSecretReaderRole(cfg))
+    + roleBinding.withSubjects([
+      subject.withKind('ServiceAccount')
+      + subject.withName(h.previewSecretReader)
+      + subject.withNamespace(cfg.namespace),
+    ]),
 }

@@ -67,7 +67,9 @@
   //   Callers must use http://app.<this-namespace>.svc.cluster.local; a call
   //   through the hostname arrives as a person. With `humans: okta`, the callers
   //   listed here skip the Okta login; everyone else still gets it. A Forge app
-  //   reaches only the routes that name it; `humans` rules never admit one.
+  //   reaches only the routes that name it; `humans` rules never admit one
+  //   (`delegatedCallers` below adds separate rules for a Forge app acting
+  //   for a person).
   //
   //   [
   //     { paths: ['/api/internal/*'], humans: 'none', frontierApps: ['frontier-some-app-prod'], principals: ['forge/persona-cf-app-oracle'] },
@@ -87,6 +89,33 @@
     gateway: 'istio-gateways/istio-forge-gateway',
     gatewayPrincipal: 'cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal',
   },
+
+  // Off by default. Forge apps, as `forge/<forge-app>`, that may act for a
+  // person on the `humans: okta` and `humans: anyone` routes, never on
+  // `humans: none`. Separate from each route's `principals`: listing an app here
+  // admits no service calls, and naming it in `principals` admits no people.
+  //
+  // The person is carried by the app's identity-service pass, which must hold
+  // `forge_delegated: "true"` (a string), `forge_user_email`, `forge_user_groups`
+  // (a list) and `forge_user_groups_csv`. On `okta` routes the email must end in
+  // @withpersona.com and match the route's `emails`, or a `forge_user_groups`
+  // entry its `groups`; on `anyone` routes any such pass from a listed app gets
+  // in. A missing claim refuses the request. The app receives the person as
+  // `x-forge-user-email` and `x-forge-user-groups` (comma-separated), beside
+  // `x-forge-caller`, and those headers are removed from every request before
+  // the pass is checked, so a caller cannot set them.
+  //
+  // The trust boundary is the identity service (`forgeIdentity.issuer`): it
+  // checks the claims' syntax, types and bounds before signing. An Istio
+  // AuthorizationPolicy can only match claim values, not validate their shape.
+  //
+  // Listing `forge/persona-cf-app-oracle` labels the Knative Service
+  // `frontier.withpersona.com/oracle-access: "true"`. The label is for
+  // discovery only and grants nothing.
+  //
+  // The jsonnet twin of the Helm chart's `delegatedCallers`; see
+  // persona-frontier-base docs/delegated-callers.md.
+  delegatedCallers: [],
 
   // Okta endpoints used to verify the forwarded ID token when a route limits
   // Okta users. Cluster-wide values; apps should not need to touch these.
@@ -345,9 +374,9 @@
   },
 
   // MySQL database on a dedicated Frontier Cloud SQL instance. Opt in separately
-  // in dev and prod to provision one instance for that app environment. The proxy uses
-  // Workload Identity and automatic IAM database authentication; no database
-  // password is exposed to the app namespace.
+  // in dev and prod to provision one instance for that app environment. The proxy
+  // pod is the only one that holds the MySQL service account. App pods connect to
+  // its Service. No database password is exposed to the app.
   mysql: {
     enabled: false,
     // Project containing the Cloud SQL instance and generated app service account.
@@ -368,13 +397,10 @@
       image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b',
     },
 
-    // Used only to create the bootstrap Secret through the Kubernetes API.
-    secretGenerator: {
-      image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/curlimages/curl@sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6',
-    },
-
     proxy: {
       image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28',
+      // Stay under the proxy pod's 45s termination grace.
+      maxSigtermDelay: '30s',
       port: 3306,
     },
 

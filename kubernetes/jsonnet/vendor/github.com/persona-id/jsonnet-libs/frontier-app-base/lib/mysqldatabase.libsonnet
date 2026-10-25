@@ -4,9 +4,12 @@
 // users, service accounts or groups, so a Kubernetes principal URL cannot be
 // the database user.
 local h = import 'helpers.libsonnet';
+local serviceAccount = import 'serviceaccount.libsonnet';
 
 local profiles = {
-  zonal: { availabilityType: 'ZONAL', tier: 'db-custom-2-7680' },
+  // Half the machine of regional-ha. environment-default picks this for dev,
+  // where traffic and data are both much smaller than production's.
+  zonal: { availabilityType: 'ZONAL', tier: 'db-custom-1-3840' },
   'regional-ha': { availabilityType: 'REGIONAL', tier: 'db-custom-2-7680' },
 };
 
@@ -19,15 +22,16 @@ local secretScript = |||
   api="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
   token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
   ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  export SSL_CERT_FILE="${ca}"
   auth="Authorization: Bearer ${token}"
   secret_url="${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets/${SECRET_NAME}"
-  if curl --fail --silent --show-error --cacert "${ca}" --header "${auth}" --output /dev/null "${secret_url}"; then
+  if wget -q --header="${auth}" -O /dev/null "${secret_url}"; then
     exit 0
   fi
   password="$(head -c 48 /dev/urandom | base64 | tr -d '\n' | head -c 48)"
   encoded_password="$(printf %s "${password}" | base64 | tr -d '\n')"
   body="$(printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"%s","namespace":"%s"},"type":"Opaque","data":{"password":"%s"}}' "${SECRET_NAME}" "${SECRET_NAMESPACE}" "${encoded_password}")"
-  curl --fail --silent --show-error --cacert "${ca}" --header "${auth}" --header "Content-Type: application/json" --data "${body}" "${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets"
+  wget -q --header="${auth}" --header="Content-Type: application/json" --post-data="${body}" -O /dev/null "${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets"
 |||;
 
 local grantScript = |||
@@ -86,7 +90,7 @@ local grantScript = |||
         },
       },
 
-      // Lets the app's `app` KSA act as the service account above. Cloud SQL
+      // Lets the cloud-sql-proxy KSA act as the service account above. Cloud SQL
       // Auth Proxy IAM login needs that service account's token.
       iamPolicy: {
         apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
@@ -99,7 +103,7 @@ local grantScript = |||
         spec: {
           bindings: [{
             members: [
-              'serviceAccount:%s.svc.id.goog[%s/app]' % [projectId, cfg.namespace],
+              'serviceAccount:%s.svc.id.goog[%s/%s]' % [projectId, cfg.namespace, h.mysqlProxyService],
             ],
             role: 'roles/iam.workloadIdentityUser',
           }],
@@ -143,7 +147,8 @@ local grantScript = |||
             ],
             deletionProtectionEnabled: true,
             diskAutoresize: true,
-            diskAutoresizeLimit: 0,
+            // 0 is unlimited. Cap growth at twice the initial disk.
+            diskAutoresizeLimit: 200,
             diskSize: 100,
             diskType: 'PD_SSD',
             edition: 'ENTERPRISE',
@@ -248,7 +253,7 @@ local grantScript = |||
                   { name: 'SECRET_NAME', value: secretName },
                   { name: 'SECRET_NAMESPACE', value: cfg.namespace },
                 ],
-                image: cfg.mysql.secretGenerator.image,
+                image: cfg.mysql.client.image,
                 name: 'generate',
                 securityContext: { allowPrivilegeEscalation: false },
               }],
@@ -370,9 +375,58 @@ local grantScript = |||
                 securityContext: { allowPrivilegeEscalation: false },
               }],
               restartPolicy: 'Never',
-              serviceAccountName: 'app',
+              serviceAccountName: h.mysqlProxyService,
             },
           },
+        },
+      },
+
+      // The only pod that runs as the MySQL Google service account. App pods
+      // connect to its Service instead of sharing this identity. The grant job
+      // above keeps its own loopback proxy, because that client shares the pod.
+      proxyServiceAccount: serviceAccount.mysqlProxy(cfg),
+
+      proxyDeployment: {
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        metadata: {
+          labels: labels,
+          name: h.mysqlProxyService,
+        },
+        spec: {
+          replicas: 2,
+          selector: {
+            matchLabels: { 'frontier.withpersona.com/workload': h.mysqlProxyService },
+          },
+          template: {
+            metadata: {
+              labels: labels { 'frontier.withpersona.com/workload': h.mysqlProxyService },
+            },
+            spec: {
+              containers: [h.mysqlProxyContainer(cfg)],
+              serviceAccountName: h.mysqlProxyService,
+              // Longer than proxy.maxSigtermDelay so the process can finish
+              // closing connections before the pod is killed.
+              terminationGracePeriodSeconds: 45,
+            },
+          },
+        },
+      },
+
+      proxyService: {
+        apiVersion: 'v1',
+        kind: 'Service',
+        metadata: {
+          labels: labels,
+          name: h.mysqlProxyService,
+        },
+        spec: {
+          ports: [{
+            name: 'mysql',
+            port: cfg.mysql.proxy.port,
+            targetPort: cfg.mysql.proxy.port,
+          }],
+          selector: { 'frontier.withpersona.com/workload': h.mysqlProxyService },
         },
       },
 
