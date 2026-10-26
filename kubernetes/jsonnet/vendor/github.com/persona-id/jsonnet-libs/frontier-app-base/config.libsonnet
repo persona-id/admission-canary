@@ -380,8 +380,10 @@
   mysql: {
     enabled: false,
     // Project containing the Cloud SQL instance and generated app service account.
-    // Required when enabled.
-    projectId: '',
+    // Every Frontier cluster's MySQL databases live in one project per cluster,
+    // so apps don't need to set this. Override only when rendering for a
+    // cluster whose Frontier MySQL project isn't persona-frontier-staging.
+    projectId: 'persona-frontier-staging',
     region: 'us-central1',
     // Empty selects this project's default VPC. Set a full network resource name
     // when the instance should use another VPC.

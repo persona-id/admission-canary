@@ -108,7 +108,7 @@ function(cfg)
     assert !cfg.mysql.migration.enabled || cfg.mysql.migration.command != [] :
            'mysql.migration.enabled needs mysql.migration.command.',
     assert !cfg.mysql.enabled || cfg.mysql.projectId != '' :
-           'mysql.projectId is required when mysql.enabled is true.',
+           'mysql.projectId must not be empty when mysql.enabled is true.',
     assert std.member(['environment-default', 'zonal', 'regional-ha'], cfg.mysql.instance.profile) :
            'mysql.instance.profile must be environment-default, zonal or regional-ha, not "%s".' % cfg.mysql.instance.profile,
     assert !cfg.mysql.enabled || (std.startsWith(cfg.namespace, 'frontier-') && std.length(cfg.namespace) <= 35) :

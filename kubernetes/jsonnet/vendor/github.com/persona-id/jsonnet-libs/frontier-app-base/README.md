@@ -128,10 +128,12 @@ MySQL is off by default. Each long-lived environment opts in separately:
 ```jsonnet
 mysql: {
   enabled: true,
-  projectId: 'persona-frontier-staging',
   instance: { profile: 'environment-default' },
 }
 ```
+
+`projectId` defaults to the cluster's single Frontier MySQL project and only
+needs to be set to render for a cluster that uses a different one.
 
 Each opted-in environment gets a separate Config Connector-managed instance.
 `environment-default` selects a zonal instance for development and a regional

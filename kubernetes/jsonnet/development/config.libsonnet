@@ -32,7 +32,6 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
     instance: { profile: 'environment-default' },
   },
 }

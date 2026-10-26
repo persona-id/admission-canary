@@ -29,4 +29,9 @@ local common = import '../common/config.libsonnet';
   image: {
     repository: app.imageRepository,
   },
+
+  mysql: {
+    enabled: true,
+    instance: { profile: 'environment-default' },
+  },
 }

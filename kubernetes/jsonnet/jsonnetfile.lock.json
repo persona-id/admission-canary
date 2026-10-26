@@ -68,8 +68,8 @@
           "subdir": "frontier-app-base"
         }
       },
-      "version": "b13ec692cbd99552a0f5e0eb76ec263c98b3bd0a",
-      "sum": "VE+1vsCFpUdeti+ZdIWTpPKKk0ED+M0dKWJz3GB6tk0="
+      "version": "c08aa6d0d1b31fd6d6e41dafcc92be4a01564c0d",
+      "sum": "L9a5iuPmpPIMK29651+EM/nY2JxuJOcuTXf1LJoLV5U="
     },
     {
       "source": {
@@ -78,7 +78,7 @@
           "subdir": "frontier-argocd-application"
         }
       },
-      "version": "b59e2434fef0f86ecfab3a05618e1648253673b0",
+      "version": "524a1bf94bf15530d43ba4582061bdf1d1f11252",
       "sum": "/oR2X/8Kuw9DhSgVzMKVbNceOJhmGvJm+9zWzw1POA0="
     }
   ],
