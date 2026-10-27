@@ -32,9 +32,6 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    // delete (not the abandon default): this environment exists to prove the
-    // admission policy's delete path against real GCP resources. Revert
-    // after the prune/recreate test below.
-    instance: { profile: 'environment-default', deletionPolicy: 'delete' },
+    instance: { profile: 'environment-default' },
   },
 }
