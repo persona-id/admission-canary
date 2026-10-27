@@ -67,11 +67,9 @@ local grantScript = |||
     local secretName = '%s-mysql-provisioner' % accountId;
     local labels = h.labels(cfg);
     local cnrmAnnotations = deletionAnnotations { 'cnrm.cloud.google.com/project-id': projectId };
-    // Cloud SQL's MySQL username for a service account is the account id, the
-    // part before '@'. A user or group keeps the full email.
-    local mysqlLogin(user) =
-      if user.type == 'CLOUD_IAM_SERVICE_ACCOUNT' then std.split(user.email, '@')[0]
-      else user.email;
+    // Cloud SQL's MySQL username is the part before '@' for an IAM user, a
+    // service account, and a group. The Cloud SQL API still takes the full email.
+    local mysqlLogin(user) = std.split(user.email, '@')[0];
     local databaseSpecs = [
       { name: databaseName, collation: cfg.mysql.collation },
     ] + [
