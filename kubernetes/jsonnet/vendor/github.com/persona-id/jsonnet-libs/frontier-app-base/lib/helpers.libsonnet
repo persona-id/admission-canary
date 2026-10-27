@@ -39,6 +39,14 @@ local sizes = {
   // when truncating so environment/user suffixes remain distinct. Enabled MySQL
   // namespaces are at most 35 characters, so the untruncated form is the one
   // the staging admission policy allows.
+  // A Frontier cluster keeps every app database in one GCP project. Dev
+  // namespaces run on the staging cluster, prod namespaces on the production
+  // cluster. An app can still set mysql.projectId when that is not true.
+  mysqlProjectId(cfg)::
+    if cfg.mysql.projectId != '' then cfg.mysql.projectId
+    else if $.isProduction(cfg) then 'persona-frontier'
+    else 'persona-frontier-staging',
+
   mysqlAccountId(cfg)::
     local namespacePrefix = 'frontier-';
     local accountPrefix = 'app-';

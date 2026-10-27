@@ -16,7 +16,8 @@ local namespace = (import 'libs.libsonnet').k.core.v1.namespace;
       name: cfg.namespace,
     } + (
       // The cluster's Frontier MySQL admission policy reads this label to scope
-      // its Cloud SQL / Workload Identity shape checks to opted-in apps only.
+      // its Cloud SQL / Workload Identity shape checks to opted-in apps only, so
+      // every other Frontier namespace's IAM and SQL objects stay unaffected.
       if cfg.mysql.enabled then { 'frontier.withpersona.com/mysql-database': 'true' } else {}
     )),
 }

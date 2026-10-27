@@ -1,4 +1,4 @@
-// expect: mysql.instance.profile must be environment-default, zonal or regional-ha
+// expect: mysql.instance.profile must be environment-default, zonal, regional-ha-small, regional-ha or regional-ha-large
 local frontier = import '../../main.libsonnet';
 
 frontier.toList(frontier.new({

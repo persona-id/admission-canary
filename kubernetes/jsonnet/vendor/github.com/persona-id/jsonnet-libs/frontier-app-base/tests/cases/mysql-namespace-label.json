@@ -1,0 +1,11 @@
+{
+   "apiVersion": "v1",
+   "data": {
+      "withMysql": "true",
+      "withoutMysql": "false"
+   },
+   "kind": "ConfigMap",
+   "metadata": {
+      "name": "mysql-namespace-label-test"
+   }
+}

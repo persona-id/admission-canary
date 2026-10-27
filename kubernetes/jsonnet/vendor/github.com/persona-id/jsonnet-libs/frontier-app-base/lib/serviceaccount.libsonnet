@@ -25,7 +25,7 @@ local serviceAccount = (import 'libs.libsonnet').k.core.v1.serviceAccount;
   mysqlProxy(cfg)::
     serviceAccount.new(h.mysqlProxyService)
     + serviceAccount.metadata.withAnnotations({
-      'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountId(cfg), cfg.mysql.projectId],
+      'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountId(cfg), h.mysqlProjectId(cfg)],
     })
     + serviceAccount.metadata.withLabels(h.labels(cfg)),
 

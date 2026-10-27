@@ -379,19 +379,25 @@
   // its Service. No database password is exposed to the app.
   mysql: {
     enabled: false,
-    // Project containing the Cloud SQL instance and generated app service account.
-    // Every Frontier cluster's MySQL databases live in one project per cluster,
-    // so apps don't need to set this. Override only when rendering for a
-    // cluster whose Frontier MySQL project isn't persona-frontier-staging.
-    projectId: 'persona-frontier-staging',
+    // Empty selects the project from the namespace: persona-frontier for a
+    // -prod namespace, persona-frontier-staging otherwise. Set it when the
+    // namespace and the cluster's project disagree.
+    projectId: '',
     region: 'us-central1',
     // Empty selects this project's default VPC. Set a full network resource name
     // when the instance should use another VPC.
     privateNetwork: '',
     instance: {
-      // environment-default selects zonal for dev and regional HA for prod.
-      // The concrete zonal and regional-ha profiles can also be selected explicitly.
+      // environment-default selects zonal for dev and regional-ha-small for
+      // prod. The concrete zonal, regional-ha-small, regional-ha and
+      // regional-ha-large profiles can also be selected explicitly, e.g. to
+      // scale a production instance up in place.
       profile: 'environment-default',
+
+      // abandon (default) leaves the Cloud SQL instance, database, users and
+      // IAM objects in GCP when their Kubernetes object is deleted. delete
+      // actually deletes them, with no final backup. Available in dev and prod.
+      deletionPolicy: 'abandon',
     },
 
     // mysql client used to generate the provisioner password and grant the app user.

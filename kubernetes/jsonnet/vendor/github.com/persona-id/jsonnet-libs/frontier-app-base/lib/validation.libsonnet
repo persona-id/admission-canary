@@ -107,10 +107,10 @@ function(cfg)
            'mysql.migration runs against the app database, which mysql.enabled: false turns off.',
     assert !cfg.mysql.migration.enabled || cfg.mysql.migration.command != [] :
            'mysql.migration.enabled needs mysql.migration.command.',
-    assert !cfg.mysql.enabled || cfg.mysql.projectId != '' :
-           'mysql.projectId must not be empty when mysql.enabled is true.',
-    assert std.member(['environment-default', 'zonal', 'regional-ha'], cfg.mysql.instance.profile) :
-           'mysql.instance.profile must be environment-default, zonal or regional-ha, not "%s".' % cfg.mysql.instance.profile,
+    assert std.member(['environment-default', 'zonal', 'regional-ha-small', 'regional-ha', 'regional-ha-large'], cfg.mysql.instance.profile) :
+           'mysql.instance.profile must be environment-default, zonal, regional-ha-small, regional-ha or regional-ha-large, not "%s".' % cfg.mysql.instance.profile,
+    assert std.member(['abandon', 'delete'], cfg.mysql.instance.deletionPolicy) :
+           'mysql.instance.deletionPolicy must be abandon or delete, not "%s".' % cfg.mysql.instance.deletionPolicy,
     assert !cfg.mysql.enabled || (std.startsWith(cfg.namespace, 'frontier-') && std.length(cfg.namespace) <= 35) :
            'mysql.enabled requires a frontier-* namespace of at most 35 characters so the generated service account id fits.',
     assert !cfg.mysql.enabled || cfg.mysql.region != '' :

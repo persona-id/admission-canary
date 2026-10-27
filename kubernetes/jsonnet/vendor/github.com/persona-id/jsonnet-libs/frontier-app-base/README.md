@@ -132,28 +132,42 @@ mysql: {
 }
 ```
 
-`projectId` defaults to the cluster's single Frontier MySQL project and only
-needs to be set to render for a cluster that uses a different one.
+`projectId` is chosen from the namespace: `persona-frontier` for a `-prod`
+namespace and `persona-frontier-staging` otherwise. Set it only when the
+namespace and the cluster's project disagree.
 
 Each opted-in environment gets a separate Config Connector-managed instance.
-`environment-default` selects a zonal instance for development and a regional
-HA instance for production. The concrete `zonal` and `regional-ha` profiles can
-also be selected explicitly, so a production environment can opt into a zonal
-non-HA instance when appropriate. These profiles use Cloud SQL Enterprise;
-“regional HA” describes availability and does not mean Enterprise Plus. Project,
-network, deletion protection, backups and machine policy remain under platform
-control.
+`environment-default` selects a zonal instance for development and a
+regional HA instance, on the same machine as dev, for production. The
+concrete `zonal`, `regional-ha-small`, `regional-ha` and `regional-ha-large`
+profiles can also be selected explicitly, so a production environment can
+scale up to a bigger machine, or opt into a zonal non-HA instance, when
+appropriate. These profiles use Cloud SQL Enterprise; “regional HA”
+describes availability and does not mean Enterprise Plus. Project, network,
+backups and machine policy remain under platform control.
 
-The profile is chosen when the instance is first created. Changing it means
-creating a new instance and migrating the data.
+Changing the profile's tier restarts the instance in place. Changing its
+availability type (zonal to regional or back) means creating a new instance
+and migrating the data.
+
+`instance.deletionPolicy` defaults to `abandon`: deleting the app's
+Kubernetes objects leaves the Cloud SQL instance, database, users and IAM
+objects in GCP untouched. Setting it to `delete` actually deletes them, in
+both dev and prod, with no final backup.
 
 The library creates the Cloud SQL instance, database, IAM user and Workload
 Identity binding in the app namespace. Only the `cloud-sql-proxy` ServiceAccount
 is annotated with that Google service account; app pods connect to its Service
-on port 3306. Dev's zonal profile is `db-custom-1-3840`. Production's regional
-HA profile stays `db-custom-2-7680`. Disk autoresize stops at 200 GB. The proxy
+on port 3306. Dev's zonal and production's default regional-ha-small profiles
+both use `db-custom-1-3840`; `regional-ha` scales that up to `db-custom-2-7680`
+and `regional-ha-large` to `db-custom-4-15360`. Disk autoresize stops at 200 GB. The proxy
 waits 30 seconds after SIGTERM before closing. A preview gets none of these
 resources.
+
+`mysql.enabled` also labels the app namespace
+`frontier.withpersona.com/mysql-database: "true"`. The cluster's Frontier
+MySQL admission policy reads that label to scope its Cloud SQL / Workload
+Identity shape checks to opted-in namespaces only.
 
 ## Configuration
 

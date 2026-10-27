@@ -7,14 +7,17 @@ local h = import 'helpers.libsonnet';
 local serviceAccount = import 'serviceaccount.libsonnet';
 
 local profiles = {
-  // Half the machine of regional-ha. environment-default picks this for dev,
-  // where traffic and data are both much smaller than production's.
+  // Same machine as regional-ha-small, without failover. environment-default
+  // picks this for dev, where traffic and data are both much smaller than
+  // production's and HA matters less.
   zonal: { availabilityType: 'ZONAL', tier: 'db-custom-1-3840' },
+  // environment-default picks this for prod: dev's machine, with failover.
+  // A production instance can scale up from here in place (a tier change
+  // restarts the instance) or opt into a bigger profile at creation.
+  'regional-ha-small': { availabilityType: 'REGIONAL', tier: 'db-custom-1-3840' },
   'regional-ha': { availabilityType: 'REGIONAL', tier: 'db-custom-2-7680' },
-};
-
-local abandon = {
-  'cnrm.cloud.google.com/deletion-policy': 'abandon',
+  // Twice regional-ha's machine.
+  'regional-ha-large': { availabilityType: 'REGIONAL', tier: 'db-custom-4-15360' },
 };
 
 local secretScript = |||
@@ -51,11 +54,18 @@ local grantScript = |||
   app(cfg)::
     local profileName =
       if cfg.mysql.instance.profile == 'environment-default' then
-        if h.isProduction(cfg) then 'regional-ha' else 'zonal'
+        if h.isProduction(cfg) then 'regional-ha-small' else 'zonal'
       else cfg.mysql.instance.profile;
     local profile = profiles[profileName];
+    // abandon (default) leaves the Cloud SQL instance, database, users and
+    // IAM objects in GCP when their Kubernetes object is deleted. delete
+    // actually deletes them, with no final backup: Config Connector's
+    // version in this cluster doesn't support one. Available in dev and prod.
+    local deletionAnnotations =
+      if cfg.mysql.instance.deletionPolicy == 'delete' then {}
+      else { 'cnrm.cloud.google.com/deletion-policy': 'abandon' };
     local accountId = h.mysqlAccountId(cfg);
-    local projectId = cfg.mysql.projectId;
+    local projectId = h.mysqlProjectId(cfg);
     local instanceName = cfg.namespace;
     local databaseName = cfg.appName;
     local privateNetwork =
@@ -73,7 +83,7 @@ local grantScript = |||
     local connectionName = '%s:%s:%s' % [projectId, cfg.mysql.region, instanceName];
     local secretName = '%s-mysql-provisioner' % accountId;
     local labels = h.labels(cfg);
-    local cnrmAnnotations = abandon { 'cnrm.cloud.google.com/project-id': projectId };
+    local cnrmAnnotations = deletionAnnotations { 'cnrm.cloud.google.com/project-id': projectId };
 
     {
       serviceAccount: {
@@ -96,7 +106,7 @@ local grantScript = |||
         apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
         kind: 'IAMPolicy',
         metadata: {
-          annotations: abandon,
+          annotations: deletionAnnotations,
           labels: labels,
           name: '%s-workload-identity' % accountId,
         },
@@ -145,7 +155,7 @@ local grantScript = |||
               { name: 'cloudsql_iam_authentication', value: 'on' },
               { name: 'performance_schema', value: 'off' },
             ],
-            deletionProtectionEnabled: true,
+            deletionProtectionEnabled: cfg.mysql.instance.deletionPolicy != 'delete',
             diskAutoresize: true,
             // 0 is unlimited. Cap growth at twice the initial disk.
             diskAutoresizeLimit: 200,

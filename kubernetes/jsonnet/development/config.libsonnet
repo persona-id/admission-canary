@@ -32,6 +32,6 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    instance: { profile: 'environment-default' },
+    instance: { profile: 'environment-default', deletionPolicy: 'delete' },
   },
 }

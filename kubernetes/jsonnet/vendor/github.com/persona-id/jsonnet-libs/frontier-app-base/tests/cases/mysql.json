@@ -342,7 +342,7 @@
                "hour": 4
             },
             "pricingPlan": "PER_USE",
-            "tier": "db-custom-2-7680"
+            "tier": "db-custom-1-3840"
          }
       }
    },
@@ -799,6 +799,7 @@
             "app.kubernetes.io/managed-by": "tanka",
             "app.kubernetes.io/name": "frontier-app-base",
             "environment": "development",
+            "frontier.withpersona.com/mysql-database": "true",
             "homestead.withpersona.com/catalog": "prod",
             "istio.io/rev": "stable",
             "name": "frontier-persona-billing-prod"
