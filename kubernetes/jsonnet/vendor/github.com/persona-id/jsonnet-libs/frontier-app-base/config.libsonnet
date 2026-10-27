@@ -374,9 +374,11 @@
   },
 
   // MySQL database on a dedicated Frontier Cloud SQL instance. Opt in separately
-  // in dev and prod to provision one instance for that app environment. The proxy
-  // pod is the only one that holds the MySQL service account. App pods connect to
-  // its Service. No database password is exposed to the app.
+  // in dev and prod to provision one instance for that app environment. Dev and
+  // prod start on the same small zonal machine; tier, high availability and disk
+  // can be raised later in place. The proxy pod is the only one that holds the
+  // MySQL service account. App pods connect to its Service. No database password
+  // is exposed to the app.
   mysql: {
     enabled: false,
     // Empty selects the project from the namespace: persona-frontier for a
@@ -387,12 +389,27 @@
     // Empty selects this project's default VPC. Set a full network resource name
     // when the instance should use another VPC.
     privateNetwork: '',
+    // Collation of the database named after appName. An entry in `databases`
+    // may set its own. utf8mb4_unicode_ci matches schemas that already use it.
+    collation: 'utf8mb4_0900_ai_ci',
+    // Databases besides the one named after appName, on the same instance.
+    // Each entry is { name, collation? }.
+    databases: [],
+    // IAM database users besides the app's generated service account. Each
+    // entry is { name, type, email }. type is CLOUD_IAM_USER,
+    // CLOUD_IAM_SERVICE_ACCOUNT or CLOUD_IAM_GROUP. Password users are not
+    // accepted: Cloud SQL makes those superusers.
+    users: [],
     instance: {
-      // environment-default selects zonal for dev and regional-ha-small for
-      // prod. The concrete zonal, regional-ha-small, regional-ha and
-      // regional-ha-large profiles can also be selected explicitly, e.g. to
-      // scale a production instance up in place.
-      profile: 'environment-default',
+      // Shared-core machine. It cannot be highly available. Raise `tier` to
+      // db-custom-1-3840, db-custom-2-7680 or db-custom-4-15360 to scale up,
+      // and set availabilityType to REGIONAL for a standby. Both changes
+      // restart the instance. Disk can grow up to diskAutoresizeLimit and
+      // cannot shrink.
+      tier: 'db-g1-small',
+      availabilityType: 'ZONAL',
+      diskSize: 10,
+      diskAutoresizeLimit: 100,
 
       // abandon (default) leaves the Cloud SQL instance, database, users and
       // IAM objects in GCP when their Kubernetes object is deleted. delete

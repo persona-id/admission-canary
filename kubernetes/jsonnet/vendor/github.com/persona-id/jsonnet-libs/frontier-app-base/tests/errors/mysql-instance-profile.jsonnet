@@ -1,4 +1,4 @@
-// expect: mysql.instance.profile must be environment-default, zonal, regional-ha-small, regional-ha or regional-ha-large
+// expect: mysql.instance.profile has been replaced by tier and availabilityType
 local frontier = import '../../main.libsonnet';
 
 frontier.toList(frontier.new({
@@ -8,6 +8,6 @@ frontier.toList(frontier.new({
   mysql: {
     enabled: true,
     projectId: 'persona-frontier-staging',
-    instance: { profile: 'custom' },
+    instance: { profile: 'regional-ha' },
   },
 }))

@@ -32,6 +32,29 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    instance: { profile: 'environment-default' },
+    // This namespace ends in -prod, which would select the persona-frontier
+    // project. The canary production app runs on the staging cluster.
+    projectId: 'persona-frontier-staging',
+    // The other collation from dev, on the app database. The extra database
+    // uses utf8mb4_0900_ai_ci.
+    collation: 'utf8mb4_unicode_ci',
+    databases: [
+      { name: 'audit', collation: 'utf8mb4_0900_ai_ci' },
+    ],
+    users: [
+      { name: 'reader', type: 'CLOUD_IAM_USER', email: 'chaitanya.prasad@withpersona.com' },
+      {
+        name: 'dev-app',
+        type: 'CLOUD_IAM_SERVICE_ACCOUNT',
+        email: 'app-admission-canary-dev@persona-frontier-staging.iam.gserviceaccount.com',
+      },
+    ],
+    instance: {
+      // Larger machine, high availability kept. Disk is already 100 GB.
+      tier: 'db-custom-4-15360',
+      availabilityType: 'REGIONAL',
+      diskSize: 100,
+      diskAutoresizeLimit: 100,
+    },
   },
 }

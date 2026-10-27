@@ -1,24 +1,11 @@
-// One dedicated Cloud SQL instance, database and IAM user for an opted-in
-// Frontier namespace. Config Connector creates the GCP resources. The app logs
-// in as its generated Google service account; Cloud SQL IAM database users are
-// users, service accounts or groups, so a Kubernetes principal URL cannot be
-// the database user.
+// One dedicated Cloud SQL instance for an opted-in Frontier namespace, plus the
+// app database, any extra databases, the app's IAM user and any extra IAM
+// users. Config Connector creates the GCP resources. The app logs in as its
+// generated Google service account; Cloud SQL IAM database users are users,
+// service accounts or groups, so a Kubernetes principal URL cannot be the
+// database user.
 local h = import 'helpers.libsonnet';
 local serviceAccount = import 'serviceaccount.libsonnet';
-
-local profiles = {
-  // Same machine as regional-ha-small, without failover. environment-default
-  // picks this for dev, where traffic and data are both much smaller than
-  // production's and HA matters less.
-  zonal: { availabilityType: 'ZONAL', tier: 'db-custom-1-3840' },
-  // environment-default picks this for prod: dev's machine, with failover.
-  // A production instance can scale up from here in place (a tier change
-  // restarts the instance) or opt into a bigger profile at creation.
-  'regional-ha-small': { availabilityType: 'REGIONAL', tier: 'db-custom-1-3840' },
-  'regional-ha': { availabilityType: 'REGIONAL', tier: 'db-custom-2-7680' },
-  // Twice regional-ha's machine.
-  'regional-ha-large': { availabilityType: 'REGIONAL', tier: 'db-custom-4-15360' },
-};
 
 local secretScript = |||
   set -eu
@@ -41,7 +28,7 @@ local grantScript = |||
   set -eu
   i=0
   while [ "$i" -lt 60 ]; do
-    if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --password="$MYSQL_PROVISIONER_PASSWORD" --execute="GRANT ALL PRIVILEGES ON \`$MYSQL_DATABASE\`.* TO '$MYSQL_USER'@'%'"; then
+    if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute="$MYSQL_GRANTS"; then
       exit 0
     fi
     i=$((i + 1))
@@ -52,11 +39,7 @@ local grantScript = |||
 
 {
   app(cfg)::
-    local profileName =
-      if cfg.mysql.instance.profile == 'environment-default' then
-        if h.isProduction(cfg) then 'regional-ha-small' else 'zonal'
-      else cfg.mysql.instance.profile;
-    local profile = profiles[profileName];
+    local instanceSettings = cfg.mysql.instance;
     // abandon (default) leaves the Cloud SQL instance, database, users and
     // IAM objects in GCP when their Kubernetes object is deleted. delete
     // actually deletes them, with no final backup: Config Connector's
@@ -84,6 +67,38 @@ local grantScript = |||
     local secretName = '%s-mysql-provisioner' % accountId;
     local labels = h.labels(cfg);
     local cnrmAnnotations = deletionAnnotations { 'cnrm.cloud.google.com/project-id': projectId };
+    // Cloud SQL's MySQL username for a service account is the account id, the
+    // part before '@'. A user or group keeps the full email.
+    local mysqlLogin(user) =
+      if user.type == 'CLOUD_IAM_SERVICE_ACCOUNT' then std.split(user.email, '@')[0]
+      else user.email;
+    local databaseSpecs = [
+      { name: databaseName, collation: cfg.mysql.collation },
+    ] + [
+      { name: db.name, collation: h.get(db, 'collation', cfg.mysql.collation) }
+      for db in cfg.mysql.databases
+    ];
+    local grantLogins = [accountId] + [mysqlLogin(user) for user in cfg.mysql.users];
+    local grantSql = std.join(' ', [
+      "GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';" % [db.name, login]
+      for db in databaseSpecs
+      for login in grantLogins
+    ]);
+    local sqlDatabase(db) = {
+      apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
+      kind: 'SQLDatabase',
+      metadata: {
+        annotations: cnrmAnnotations,
+        labels: labels,
+        name: db.name,
+      },
+      spec: {
+        charset: 'utf8mb4',
+        collation: db.collation,
+        instanceRef: { name: instanceName },
+        resourceID: db.name,
+      },
+    };
 
     {
       serviceAccount: {
@@ -131,7 +146,9 @@ local grantScript = |||
         metadata: {
           annotations: cnrmAnnotations,
           // Config Connector copies these onto the Cloud SQL user labels.
-          labels: labels { environment: environmentLabel },
+          // owner_* is permissions.owner split on ".", so a CPU alert can
+          // address that person. See helpers.mysqlOwnerLabels.
+          labels: labels { environment: environmentLabel } + h.mysqlOwnerLabels(cfg),
           name: instanceName,
         },
         spec: {
@@ -140,7 +157,7 @@ local grantScript = |||
           resourceID: instanceName,
           settings: {
             activationPolicy: 'ALWAYS',
-            availabilityType: profile.availabilityType,
+            availabilityType: instanceSettings.availabilityType,
             backupConfiguration: {
               backupRetentionSettings: {
                 retainedBackups: 7,
@@ -157,9 +174,8 @@ local grantScript = |||
             ],
             deletionProtectionEnabled: cfg.mysql.instance.deletionPolicy != 'delete',
             diskAutoresize: true,
-            // 0 is unlimited. Cap growth at twice the initial disk.
-            diskAutoresizeLimit: 200,
-            diskSize: 100,
+            diskAutoresizeLimit: instanceSettings.diskAutoresizeLimit,
+            diskSize: instanceSettings.diskSize,
             diskType: 'PD_SSD',
             edition: 'ENTERPRISE',
             ipConfiguration: {
@@ -169,7 +185,7 @@ local grantScript = |||
             },
             maintenanceWindow: { day: 2, hour: 4 },
             pricingPlan: 'PER_USE',
-            tier: profile.tier,
+            tier: instanceSettings.tier,
           },
         },
       },
@@ -180,7 +196,7 @@ local grantScript = |||
         metadata: {
           annotations: {
             'argocd.argoproj.io/hook': 'PreSync',
-            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation',
+            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
             'argocd.argoproj.io/sync-wave': '-1',
           },
           labels: labels,
@@ -194,7 +210,7 @@ local grantScript = |||
         metadata: {
           annotations: {
             'argocd.argoproj.io/hook': 'PreSync',
-            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation',
+            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
             'argocd.argoproj.io/sync-wave': '-1',
           },
           labels: labels,
@@ -221,7 +237,7 @@ local grantScript = |||
         metadata: {
           annotations: {
             'argocd.argoproj.io/hook': 'PreSync',
-            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation',
+            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
             'argocd.argoproj.io/sync-wave': '-1',
           },
           labels: labels,
@@ -247,7 +263,7 @@ local grantScript = |||
         metadata: {
           annotations: {
             'argocd.argoproj.io/hook': 'PreSync',
-            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation',
+            'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
           },
           labels: labels,
           name: '%s-mysql-secret' % accountId,
@@ -294,20 +310,30 @@ local grantScript = |||
         },
       },
 
-      database: {
-        apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
-        kind: 'SQLDatabase',
-        metadata: {
-          annotations: cnrmAnnotations,
-          labels: labels,
-          name: databaseName,
-        },
-        spec: {
-          charset: 'utf8mb4',
-          collation: 'utf8mb4_0900_ai_ci',
-          instanceRef: { name: instanceName },
-          resourceID: databaseName,
-        },
+      database: sqlDatabase(databaseSpecs[0]),
+
+      extraDatabases: {
+        [db.name]: sqlDatabase(db)
+        for db in databaseSpecs
+        if db.name != databaseName
+      },
+
+      extraUsers: {
+        [user.name]: {
+          apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
+          kind: 'SQLUser',
+          metadata: {
+            annotations: cnrmAnnotations,
+            labels: labels,
+            name: user.name,
+          },
+          spec: {
+            instanceRef: { name: instanceName },
+            resourceID: user.email,
+            type: user.type,
+          },
+        }
+        for user in cfg.mysql.users
       },
 
       user: {
@@ -373,10 +399,9 @@ local grantScript = |||
                 args: [grantScript],
                 command: ['/bin/sh', '-c'],
                 env: [
-                  { name: 'MYSQL_DATABASE', value: databaseName },
-                  { name: 'MYSQL_USER', value: accountId },
+                  { name: 'MYSQL_GRANTS', value: grantSql },
                   {
-                    name: 'MYSQL_PROVISIONER_PASSWORD',
+                    name: 'MYSQL_PWD',
                     valueFrom: { secretKeyRef: { key: 'password', name: secretName } },
                   },
                 ],

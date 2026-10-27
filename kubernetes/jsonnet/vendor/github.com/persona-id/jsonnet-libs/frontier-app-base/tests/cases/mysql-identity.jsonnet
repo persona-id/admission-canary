@@ -1,5 +1,4 @@
 local cfg = import '../../config.libsonnet';
-local h = import '../../lib/helpers.libsonnet';
 local serviceAccount = import '../../lib/serviceaccount.libsonnet';
 
 local mysqlIdentityCfg = cfg {
@@ -18,9 +17,5 @@ local mysqlIdentityCfg = cfg {
   data: {
     generatedIdentity:
       serviceAccount.mysqlProxy(mysqlIdentityCfg).metadata.annotations['iam.gke.io/gcp-service-account'],
-    longName:
-      h.mysqlAccountId(cfg {
-        namespace: 'frontier-abcdefghijklmnopqrstuvwxyz-prod',
-      }),
   },
 }

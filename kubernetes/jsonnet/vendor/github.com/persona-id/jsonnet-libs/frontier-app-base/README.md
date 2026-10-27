@@ -128,7 +128,21 @@ MySQL is off by default. Each long-lived environment opts in separately:
 ```jsonnet
 mysql: {
   enabled: true,
-  instance: { profile: 'environment-default' },
+  // Both environments start here. Raise any of these later; dev and prod
+  // accept the same values.
+  instance: {
+    tier: 'db-g1-small',              // or db-custom-1-3840, db-custom-2-7680, db-custom-4-15360
+    availabilityType: 'ZONAL',        // REGIONAL once tier is a db-custom size
+    diskSize: 10,                     // whole GB, 10 to 100, and only upwards
+    diskAutoresizeLimit: 100,
+  },
+  collation: 'utf8mb4_0900_ai_ci',    // or utf8mb4_unicode_ci
+  databases: [
+    { name: 'reporting', collation: 'utf8mb4_unicode_ci' },
+  ],
+  users: [
+    { name: 'billing-reader', type: 'CLOUD_IAM_USER', email: 'reader@withpersona.com' },
+  ],
 }
 ```
 
@@ -136,33 +150,26 @@ mysql: {
 namespace and `persona-frontier-staging` otherwise. Set it only when the
 namespace and the cluster's project disagree.
 
-Each opted-in environment gets a separate Config Connector-managed instance.
-`environment-default` selects a zonal instance for development and a
-regional HA instance, on the same machine as dev, for production. The
-concrete `zonal`, `regional-ha-small`, `regional-ha` and `regional-ha-large`
-profiles can also be selected explicitly, so a production environment can
-scale up to a bigger machine, or opt into a zonal non-HA instance, when
-appropriate. These profiles use Cloud SQL Enterprise; “regional HA”
-describes availability and does not mean Enterprise Plus. Project, network,
-backups and machine policy remain under platform control.
-
-Changing the profile's tier restarts the instance in place. Changing its
-availability type (zonal to regional or back) means creating a new instance
-and migrating the data.
+Each opted-in environment gets its own Config Connector-managed instance.
+Dev and prod use the same default: zonal `db-g1-small`, 10 GB, growing to
+at most 100 GB. `db-g1-small` is a shared-core machine and cannot be highly
+available. A `db-custom-*` tier can be `ZONAL` or `REGIONAL`. Changing the
+tier or the availability type restarts the instance in place. Disk can grow
+and cannot shrink. The version the library creates is MySQL 8.0.
 
 `instance.deletionPolicy` defaults to `abandon`: deleting the app's
 Kubernetes objects leaves the Cloud SQL instance, database, users and IAM
 objects in GCP untouched. Setting it to `delete` actually deletes them, in
 both dev and prod, with no final backup.
 
-The library creates the Cloud SQL instance, database, IAM user and Workload
-Identity binding in the app namespace. Only the `cloud-sql-proxy` ServiceAccount
-is annotated with that Google service account; app pods connect to its Service
-on port 3306. Dev's zonal and production's default regional-ha-small profiles
-both use `db-custom-1-3840`; `regional-ha` scales that up to `db-custom-2-7680`
-and `regional-ha-large` to `db-custom-4-15360`. Disk autoresize stops at 200 GB. The proxy
-waits 30 seconds after SIGTERM before closing. A preview gets none of these
-resources.
+The library creates the Cloud SQL instance, the database named after the
+app, any extra `databases`, the app IAM user, any extra `users`, and the
+Workload Identity binding in the app namespace. Extra users are IAM users,
+service accounts or groups. A password user is not accepted, because Cloud
+SQL makes those superusers. Only the `cloud-sql-proxy` ServiceAccount is
+annotated with the app's Google service account; app pods connect to its
+Service on port 3306. The proxy waits 30 seconds after SIGTERM before
+closing. A preview gets none of these resources.
 
 `mysql.enabled` also labels the app namespace
 `frontier.withpersona.com/mysql-database: "true"`. The cluster's Frontier

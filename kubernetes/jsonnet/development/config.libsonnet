@@ -32,6 +32,28 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    instance: { profile: 'environment-default', deletionPolicy: 'delete' },
+    // Collation is how MySQL sorts and compares text. The app database keeps
+    // utf8mb4_0900_ai_ci. The extra database uses the other allowed collation.
+    collation: 'utf8mb4_0900_ai_ci',
+    databases: [
+      { name: 'reporting', collation: 'utf8mb4_unicode_ci' },
+    ],
+    users: [
+      { name: 'reader', type: 'CLOUD_IAM_USER', email: 'chaitanya.prasad@withpersona.com' },
+      {
+        name: 'prod-app',
+        type: 'CLOUD_IAM_SERVICE_ACCOUNT',
+        email: 'app-admission-canary-prod@persona-frontier-staging.iam.gserviceaccount.com',
+      },
+    ],
+    instance: {
+      // Vertical scale from db-custom-1-3840, still zonal. Disk is already
+      // 100 GB and cannot shrink. The cap drops from 200 GB to the policy max.
+      tier: 'db-custom-2-7680',
+      availabilityType: 'ZONAL',
+      diskSize: 100,
+      diskAutoresizeLimit: 100,
+      deletionPolicy: 'delete',
+    },
   },
 }

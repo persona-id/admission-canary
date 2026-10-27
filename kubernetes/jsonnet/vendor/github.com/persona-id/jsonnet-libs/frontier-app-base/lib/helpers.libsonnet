@@ -35,10 +35,6 @@ local sizes = {
   // Follows Knative's config-domain on frontier-us-central1.
   appURL(cfg):: 'https://app-%s.%s.frontier.withpersona.app' % [cfg.namespace, cfg.visibility],
 
-  // Cloud IAM service account IDs are limited to 30 characters. Keep both ends
-  // when truncating so environment/user suffixes remain distinct. Enabled MySQL
-  // namespaces are at most 35 characters, so the untruncated form is the one
-  // the staging admission policy allows.
   // A Frontier cluster keeps every app database in one GCP project. Dev
   // namespaces run on the staging cluster, prod namespaces on the production
   // cluster. An app can still set mysql.projectId when that is not true.
@@ -47,12 +43,13 @@ local sizes = {
     else if $.isProduction(cfg) then 'persona-frontier'
     else 'persona-frontier-staging',
 
+  // Cloud IAM service account IDs are limited to 30 characters. Validation
+  // rejects an enabled MySQL namespace that is not frontier-* or is longer
+  // than 35 characters, which keeps app-<namespace-without-prefix> at 30.
   mysqlAccountId(cfg)::
     local namespacePrefix = 'frontier-';
-    local accountPrefix = 'app-';
     local app = if std.startsWith(cfg.namespace, namespacePrefix) then std.substr(cfg.namespace, std.length(namespacePrefix), std.length(cfg.namespace)) else cfg.namespace;
-    if std.length(app) <= 26 then accountPrefix + app
-    else '%s%s-%s' % [accountPrefix, std.substr(app, 0, 17), std.substr(app, std.length(app) - 8, 8)],
+    'app-' + app,
 
   // In-namespace Service the app connects to. The proxy pod is the only one
   // that runs as the MySQL Google service account.
@@ -182,6 +179,21 @@ local sizes = {
     'app.kubernetes.io/managed-by': cfg.managedBy,
     'app.kubernetes.io/name': 'frontier-app-base',
   },
+
+  // How many Cloud SQL user labels carry permissions.owner. A GCP label value
+  // cannot contain ".", and Datadog builds the owner's email by joining these
+  // parts with ".". Unused slots are "_" (a username cannot contain "_").
+  mysqlOwnerLabelCount:: 6,
+
+  mysqlOwnerLabels(cfg)::
+    local parts = std.split(cfg.permissions.owner, '.');
+    local n = $.mysqlOwnerLabelCount;
+    local extra = if std.length(parts) > n then 0 else n - std.length(parts);
+    local padded = parts + std.makeArray(extra, function(i) '_');
+    {
+      ['owner_%d' % i]: padded[i]
+      for i in std.range(0, n - 1)
+    },
 
   // Normalize a name for use with Kubernetes resources.
   normalize(name):: std.strReplace(std.strReplace(std.asciiLower(name), ' ', '-'), '_', '-'),

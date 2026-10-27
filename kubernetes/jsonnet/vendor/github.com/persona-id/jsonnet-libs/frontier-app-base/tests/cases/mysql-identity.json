@@ -1,8 +1,7 @@
 {
    "apiVersion": "v1",
    "data": {
-      "generatedIdentity": "app-mysql-identity-prod@persona-frontier-staging.iam.gserviceaccount.com",
-      "longName": "app-abcdefghijklmnopq-xyz-prod"
+      "generatedIdentity": "app-mysql-identity-prod@persona-frontier-staging.iam.gserviceaccount.com"
    },
    "kind": "ConfigMap",
    "metadata": {

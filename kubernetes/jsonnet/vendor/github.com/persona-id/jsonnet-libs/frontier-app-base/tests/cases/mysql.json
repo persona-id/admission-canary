@@ -186,7 +186,7 @@
                "containers": [
                   {
                      "args": [
-                        "set -eu\ni=0\nwhile [ \"$i\" -lt 60 ]; do\n  if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --password=\"$MYSQL_PROVISIONER_PASSWORD\" --execute=\"GRANT ALL PRIVILEGES ON \\`$MYSQL_DATABASE\\`.* TO '$MYSQL_USER'@'%'\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
+                        "set -eu\ni=0\nwhile [ \"$i\" -lt 60 ]; do\n  if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute=\"$MYSQL_GRANTS\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
                      ],
                      "command": [
                         "/bin/sh",
@@ -194,15 +194,11 @@
                      ],
                      "env": [
                         {
-                           "name": "MYSQL_DATABASE",
-                           "value": "persona-billing-prod"
+                           "name": "MYSQL_GRANTS",
+                           "value": "GRANT ALL PRIVILEGES ON `persona-billing-prod`.* TO 'app-persona-billing-prod'@'%';"
                         },
                         {
-                           "name": "MYSQL_USER",
-                           "value": "app-persona-billing-prod"
-                        },
-                        {
-                           "name": "MYSQL_PROVISIONER_PASSWORD",
+                           "name": "MYSQL_PWD",
                            "valueFrom": {
                               "secretKeyRef": {
                                  "key": "password",
@@ -293,7 +289,13 @@
             "app.kubernetes.io/instance": "persona-billing-prod",
             "app.kubernetes.io/managed-by": "tanka",
             "app.kubernetes.io/name": "frontier-app-base",
-            "environment": "staging"
+            "environment": "staging",
+            "owner_0": "owner",
+            "owner_1": "_",
+            "owner_2": "_",
+            "owner_3": "_",
+            "owner_4": "_",
+            "owner_5": "_"
          },
          "name": "frontier-persona-billing-prod"
       },
@@ -303,7 +305,7 @@
          "resourceID": "frontier-persona-billing-prod",
          "settings": {
             "activationPolicy": "ALWAYS",
-            "availabilityType": "REGIONAL",
+            "availabilityType": "ZONAL",
             "backupConfiguration": {
                "backupRetentionSettings": {
                   "retainedBackups": 7,
@@ -326,8 +328,8 @@
             ],
             "deletionProtectionEnabled": true,
             "diskAutoresize": true,
-            "diskAutoresizeLimit": 200,
-            "diskSize": 100,
+            "diskAutoresizeLimit": 100,
+            "diskSize": 10,
             "diskType": "PD_SSD",
             "edition": "ENTERPRISE",
             "ipConfiguration": {
@@ -342,7 +344,7 @@
                "hour": 4
             },
             "pricingPlan": "PER_USE",
-            "tier": "db-custom-1-3840"
+            "tier": "db-g1-small"
          }
       }
    },
@@ -352,7 +354,7 @@
       "metadata": {
          "annotations": {
             "argocd.argoproj.io/hook": "PreSync",
-            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation"
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded"
          },
          "labels": {
             "app.kubernetes.io/instance": "persona-billing-prod",
@@ -575,7 +577,7 @@
       "metadata": {
          "annotations": {
             "argocd.argoproj.io/hook": "PreSync",
-            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
             "argocd.argoproj.io/sync-wave": "-1"
          },
          "labels": {
@@ -619,7 +621,7 @@
       "metadata": {
          "annotations": {
             "argocd.argoproj.io/hook": "PreSync",
-            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
             "argocd.argoproj.io/sync-wave": "-1"
          },
          "labels": {
@@ -648,7 +650,7 @@
       "metadata": {
          "annotations": {
             "argocd.argoproj.io/hook": "PreSync",
-            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
             "argocd.argoproj.io/sync-wave": "-1"
          },
          "labels": {
