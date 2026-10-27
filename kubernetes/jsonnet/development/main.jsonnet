@@ -20,24 +20,4 @@ function(imageTag)
     },
   ], {});
 
-  frontier.toList(frontier.new(config)) + [{
-    // Shape probe. Wrong database name, so the policy must deny it.
-    // Revert after the sync error is recorded. This creates no credentials.
-    apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
-    kind: 'SQLDatabase',
-    metadata: {
-      name: 'not-the-namespace-db',
-      namespace: config.namespace,
-      annotations: {
-        'cnrm.cloud.google.com/project-id': 'persona-frontier-staging',
-      },
-    },
-    spec: {
-      charset: 'utf8mb4',
-      collation: 'utf8mb4_0900_ai_ci',
-      instanceRef: {
-        name: config.namespace,
-      },
-      resourceID: 'not-the-namespace-db',
-    },
-  }]
+  frontier.toList(frontier.new(config))
