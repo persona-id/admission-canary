@@ -291,11 +291,11 @@
             "app.kubernetes.io/name": "frontier-app-base",
             "environment": "staging",
             "owner_0": "owner",
-            "owner_1": "_",
-            "owner_2": "_",
-            "owner_3": "_",
-            "owner_4": "_",
-            "owner_5": "_"
+            "owner_1": "none",
+            "owner_2": "none",
+            "owner_3": "none",
+            "owner_4": "none",
+            "owner_5": "none"
          },
          "name": "frontier-persona-billing-prod"
       },

@@ -182,14 +182,14 @@ local sizes = {
 
   // How many Cloud SQL user labels carry permissions.owner. A GCP label value
   // cannot contain ".", and Datadog builds the owner's email by joining these
-  // parts with ".". Unused slots are "_" (a username cannot contain "_").
+  // parts with ".". Unused slots are "none": a Kubernetes label cannot be "_".
   mysqlOwnerLabelCount:: 6,
 
   mysqlOwnerLabels(cfg)::
     local parts = std.split(cfg.permissions.owner, '.');
     local n = $.mysqlOwnerLabelCount;
     local extra = if std.length(parts) > n then 0 else n - std.length(parts);
-    local padded = parts + std.makeArray(extra, function(i) '_');
+    local padded = parts + std.makeArray(extra, function(i) 'none');
     {
       ['owner_%d' % i]: padded[i]
       for i in std.range(0, n - 1)
