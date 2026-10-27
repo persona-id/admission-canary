@@ -14,5 +14,9 @@ local namespace = (import 'libs.libsonnet').k.core.v1.namespace;
       // app's pods join no mesh, and none of its Istio policies apply.
       'istio.io/rev': 'stable',
       name: cfg.namespace,
-    }),
+    } + (
+      // The cluster's Frontier MySQL admission policy reads this label to scope
+      // its Cloud SQL / Workload Identity shape checks to opted-in apps only.
+      if cfg.mysql.enabled then { 'frontier.withpersona.com/mysql-database': 'true' } else {}
+    )),
 }
