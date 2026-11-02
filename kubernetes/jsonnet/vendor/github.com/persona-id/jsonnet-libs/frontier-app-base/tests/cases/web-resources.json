@@ -1,0 +1,68 @@
+[
+   {
+      "apiVersion": "serving.knative.dev/v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "demo",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "knative.withpersona.com/visibility": "private"
+         },
+         "name": "app"
+      },
+      "spec": {
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "autoscaling.knative.dev/minScale": "3",
+                  "autoscaling.knative.dev/target-burst-capacity": "0"
+               },
+               "labels": {
+                  "environment": "production"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "image": "r:t",
+                     "ports": [
+                        {
+                           "containerPort": 4000
+                        }
+                     ],
+                     "resources": {
+                        "limits": {
+                           "memory": "4Gi"
+                        },
+                        "requests": {
+                           "cpu": "1",
+                           "memory": "2Gi"
+                        }
+                     }
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard"
+               },
+               "serviceAccountName": "app",
+               "timeoutSeconds": 300,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard"
+                  }
+               ]
+            }
+         },
+         "traffic": [
+            {
+               "latestRevision": true,
+               "percent": 100
+            }
+         ]
+      }
+   }
+]

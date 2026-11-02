@@ -23,6 +23,7 @@ local probes(cfg) =
   app(cfg)::
     local placement = h.placement(cfg, cfg.computeClass);
     local volumes = h.podVolumes(cfg);
+    local webResources = h.webResources(cfg);
     local source = h.sourceAnnotations(cfg);
     local annotations =
       source
@@ -41,7 +42,7 @@ local probes(cfg) =
     + ksvc.metadata.withLabels(
       h.labels(cfg)
       // For discovery only; it grants nothing. See `delegatedCallers`.
-      + (if std.member(h.delegatedCallers(cfg), 'forge/persona-cf-app-oracle') then { 'frontier.withpersona.com/oracle-access': 'true' } else {})
+      + (if std.any([h.forgePrincipal(cfg, c) == { prefix: 'forge-internal', name: 'persona-cf-app-oracle', environment: 'production' } for c in h.delegatedCallers(cfg)]) then { 'frontier.withpersona.com/oracle-access': 'true' } else {})
       + if cfg.visibility == 'none'
       then { 'networking.knative.dev/visibility': 'cluster-local' }
       else { 'knative.withpersona.com/visibility': cfg.visibility }
@@ -55,6 +56,8 @@ local probes(cfg) =
       container.withImage(h.appImage(cfg))
       + container.withPorts([libs.k.core.v1.containerPort.new(cfg.service.port)])
       + h.podContainerMixin(cfg)
+      + (if std.objectHas(webResources, 'requests') then container.resources.withRequests(webResources.requests) else {})
+      + (if std.objectHas(webResources, 'limits') then container.resources.withLimits(webResources.limits) else {})
       + probes(cfg),
     ])
     // Knative drops the node selector and tolerations unless the cluster enables

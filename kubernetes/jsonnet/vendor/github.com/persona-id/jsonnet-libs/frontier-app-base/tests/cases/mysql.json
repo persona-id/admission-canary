@@ -46,6 +46,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -71,6 +72,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -162,7 +164,7 @@
          "annotations": {
             "argocd.argoproj.io/hook": "Sync",
             "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
-            "argocd.argoproj.io/sync-wave": "0"
+            "argocd.argoproj.io/sync-wave": "1"
          },
          "labels": {
             "app.kubernetes.io/instance": "persona-billing-prod",
@@ -172,8 +174,8 @@
          "name": "app-persona-billing-prod-mysql-grants"
       },
       "spec": {
-         "activeDeadlineSeconds": 2400,
-         "backoffLimit": 2,
+         "activeDeadlineSeconds": 360,
+         "backoffLimit": 0,
          "template": {
             "metadata": {
                "labels": {
@@ -186,7 +188,7 @@
                "containers": [
                   {
                      "args": [
-                        "set -eu\ni=0\nwhile [ \"$i\" -lt 60 ]; do\n  if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute=\"$MYSQL_GRANTS\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
+                        "set -eu\ni=0\nwhile [ \"$i\" -lt 30 ]; do\n  if mysql --connect-timeout=10 --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute=\"$MYSQL_GRANTS\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
                      ],
                      "command": [
                         "/bin/sh",
@@ -195,7 +197,7 @@
                      "env": [
                         {
                            "name": "MYSQL_GRANTS",
-                           "value": "GRANT ALL PRIVILEGES ON `persona-billing-prod`.* TO 'app-persona-billing-prod'@'%';"
+                           "value": "DROP USER IF EXISTS 'root'@'%'; GRANT ALL PRIVILEGES ON `persona-billing-prod`.* TO 'app-persona-billing-prod'@'%';"
                         },
                         {
                            "name": "MYSQL_PWD",
@@ -232,7 +234,7 @@
                         "runAsNonRoot": true
                      },
                      "startupProbe": {
-                        "failureThreshold": 1800,
+                        "failureThreshold": 300,
                         "httpGet": {
                            "path": "/startup",
                            "port": 9091
@@ -344,7 +346,7 @@
                "hour": 4
             },
             "pricingPlan": "PER_USE",
-            "tier": "db-g1-small"
+            "tier": "db-custom-1-3840"
          }
       }
    },
@@ -437,7 +439,13 @@
          "labels": {
             "app.kubernetes.io/instance": "persona-billing-prod",
             "app.kubernetes.io/managed-by": "tanka",
-            "app.kubernetes.io/name": "frontier-app-base"
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/owner_0": "owner",
+            "frontier.withpersona.com/owner_1": "none",
+            "frontier.withpersona.com/owner_2": "none",
+            "frontier.withpersona.com/owner_3": "none",
+            "frontier.withpersona.com/owner_4": "none",
+            "frontier.withpersona.com/owner_5": "none"
          },
          "name": "cloud-sql-proxy"
       },
@@ -450,6 +458,9 @@
          },
          "template": {
             "metadata": {
+               "annotations": {
+                  "frontier.withpersona.com/mysql-connection-name": "persona-frontier-staging:us-central1:frontier-persona-billing-prod"
+               },
                "labels": {
                   "app.kubernetes.io/instance": "persona-billing-prod",
                   "app.kubernetes.io/managed-by": "tanka",
@@ -458,6 +469,23 @@
                }
             },
             "spec": {
+               "affinity": {
+                  "podAntiAffinity": {
+                     "preferredDuringSchedulingIgnoredDuringExecution": [
+                        {
+                           "podAffinityTerm": {
+                              "labelSelector": {
+                                 "matchLabels": {
+                                    "frontier.withpersona.com/workload": "cloud-sql-proxy"
+                                 }
+                              },
+                              "topologyKey": "kubernetes.io/hostname"
+                           },
+                           "weight": 100
+                        }
+                     ]
+                  }
+               },
                "containers": [
                   {
                      "args": [
@@ -466,7 +494,7 @@
                         "--health-check",
                         "--http-address=0.0.0.0",
                         "--http-port=9091",
-                        "--max-sigterm-delay=30s",
+                        "--max-sigterm-delay=290s",
                         "--private-ip",
                         "--structured-logs",
                         "--port=3306",
@@ -527,7 +555,49 @@
                   }
                ],
                "serviceAccountName": "cloud-sql-proxy",
-               "terminationGracePeriodSeconds": 45
+               "terminationGracePeriodSeconds": 305
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "persona-billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "maxUnavailable": 1,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "persona-billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
             }
          }
       }
@@ -546,7 +616,7 @@
       "spec": {
          "ports": [
             {
-               "name": "mysql",
+               "name": "tcp-mysql",
                "port": 3306,
                "targetPort": 3306
             }
@@ -711,7 +781,7 @@
          "annotations": {
             "argocd.argoproj.io/hook": "Sync",
             "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
-            "argocd.argoproj.io/sync-wave": "1"
+            "argocd.argoproj.io/sync-wave": "2"
          },
          "labels": {
             "app.kubernetes.io/component": "mysql-migration",
@@ -795,6 +865,9 @@
       "apiVersion": "v1",
       "kind": "Namespace",
       "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/sync-wave": "-1"
+         },
          "labels": {
             "app": "persona-billing-prod",
             "app.kubernetes.io/instance": "persona-billing-prod",
@@ -884,7 +957,7 @@
       "kind": "CronJob",
       "metadata": {
          "annotations": {
-            "argocd.argoproj.io/sync-wave": "2"
+            "argocd.argoproj.io/sync-wave": "3"
          },
          "labels": {
             "app.kubernetes.io/component": "scheduled-job",
@@ -997,7 +1070,7 @@
       "kind": "Service",
       "metadata": {
          "annotations": {
-            "argocd.argoproj.io/sync-wave": "2"
+            "argocd.argoproj.io/sync-wave": "3"
          },
          "labels": {
             "app.kubernetes.io/instance": "persona-billing-prod",
@@ -1102,7 +1175,7 @@
       "kind": "Deployment",
       "metadata": {
          "annotations": {
-            "argocd.argoproj.io/sync-wave": "2"
+            "argocd.argoproj.io/sync-wave": "3"
          },
          "labels": {
             "app.kubernetes.io/component": "worker",

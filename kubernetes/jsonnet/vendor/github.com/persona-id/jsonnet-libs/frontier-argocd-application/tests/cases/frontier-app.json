@@ -38,6 +38,14 @@
             "prune": true,
             "selfHeal": true
          },
+         "retry": {
+            "backoff": {
+               "duration": "10s",
+               "factor": 2,
+               "maxDuration": "3m"
+            },
+            "limit": 5
+         },
          "syncOptions": [
             "CreateNamespace=true"
          ]

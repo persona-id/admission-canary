@@ -8,13 +8,16 @@
 local app = import '../common/app.libsonnet';
 local frontier = import 'github.com/persona-id/jsonnet-libs/frontier-app-base/main.libsonnet';
 
-function(imageTag)
+// gcpProject is the cluster's GCP project, passed by its Argo CD, where managed
+// MySQL runs.
+function(imageTag, gcpProject='')
   local config = std.foldl(std.mergePatch, [
     import '../common/config.libsonnet',
     import 'config.libsonnet',
     import 'secrets.libsonnet',
     {
       image: { tag: imageTag },
+      gcpProject: gcpProject,
       // Where the deploy came from. ArgoCD renders a commit, so it's never dirty.
       source: { repository: app.repoURL, revision: imageTag, dirty: false },
     },

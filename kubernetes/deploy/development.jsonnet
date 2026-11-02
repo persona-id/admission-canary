@@ -8,7 +8,9 @@
 local app = import '../jsonnet/common/app.libsonnet';
 local argocd = import 'github.com/persona-id/jsonnet-libs/frontier-argocd-application/main.libsonnet';
 
-argocd.newFrontierApp(
+// gcpProject is the cluster's GCP project, passed by its Argo CD, where managed
+// MySQL runs.
+function(gcpProject='') argocd.newFrontierApp(
   'development',
   import '../jsonnet/development/config.libsonnet',
   app.repoURL,
@@ -17,4 +19,5 @@ argocd.newFrontierApp(
   // after every merge to main. .github/workflows/deploy-dev.yaml pushes the
   // image under each frontier-dev commit sha.
   targetRevision='frontier-dev',
+  gcpProject=gcpProject,
 )

@@ -48,12 +48,25 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
     // pass tells them apart; a pass holder is admitted by a route that names it.
     local fromPeople = rule.withFrom([
       rule.from.source.withPrincipals(gateways)
-      + rule.from.source.withNotRequestPrincipals([cfg.forgeIdentity.issuer + '/*']),
+      + rule.from.source.withNotRequestPrincipals([
+        cfg.forgeIdentity.issuers[prefix].issuer + '/*'
+        for prefix in std.objectFields(cfg.forgeIdentity.issuers)
+      ]),
     ]);
-    local fromForge(apps) = rule.withFrom([
+    local fromForge(principals) = rule.withFrom([
       rule.from.source.withPrincipals([cfg.forgeIdentity.gatewayPrincipal])
-      + rule.from.source.withRequestPrincipals([cfg.forgeIdentity.issuer + '/' + a for a in apps]),
+      + rule.from.source.withRequestPrincipals(uniq([h.forgeRequestPrincipal(cfg, p) for p in principals])),
     ]);
+    // A pass's `sub` is the app in every environment, so a Forge rule also pins
+    // the pass's `forge_environment`: Forge principals grouped by environment,
+    // one rule each. A pass without the claim matches none of them.
+    local forgeByEnvironment(principals) =
+      local environment(p) = h.forgePrincipal(cfg, p).environment;
+      [
+        { environment: e, principals: [p for p in principals if environment(p) == e] }
+        for e in uniq([environment(p) for p in principals])
+      ];
+    local inEnvironment(e) = rule.when.withKey('request.auth.claims[forge_environment]') + rule.when.withValues([e]);
 
     // Where Okta is skipped for the in-cluster names, gateway traffic to those
     // names is not a person: knative-local-gateway routes them on the same
@@ -83,8 +96,9 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
         then [{ forge_user_email: route.emails }, { forge_user_groups: route.groups }]
         else [];
       local allowlist = [c for c in claims if c[std.objectFields(c)[0]] != []];
-      local when(extra) = rule.withWhen(
+      local when(environment, extra) = rule.withWhen(
         [
+          inEnvironment(environment),
           rule.when.withKey('request.auth.claims[forge_delegated]') + rule.when.withValues(['true']),
           rule.when.withKey('request.auth.claims[forge_user_email]')
           + rule.when.withValues([if route.humans == 'okta' then corporateEmail else '*']),
@@ -93,7 +107,8 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
       );
       if callers == [] || route.humans == 'none' then []
       else [
-        fromForge([std.substr(c, std.length('forge/'), std.length(c)) for c in callers]) + to(route) + when(extra)
+        fromForge(group.principals) + to(route) + when(group.environment, extra)
+        for group in forgeByEnvironment(callers)
         for extra in (if allowlist != [] then allowlist else [{}])
       ];
 
@@ -108,8 +123,11 @@ local uniq(xs) = std.foldl(function(acc, x) if std.member(acc, x) then acc else 
 
     // Forge apps arrive through the gateway's Forge listener carrying a pass.
     local forgeRules(route) =
-      local apps = uniq([std.substr(p, std.length('forge/'), std.length(p)) for p in route.principals if std.startsWith(p, 'forge/')]);
-      if apps == [] then [] else [fromForge(apps) + to(route)];
+      local principals = uniq([p for p in route.principals if h.forgePrincipal(cfg, p) != null]);
+      [
+        fromForge(group.principals) + to(route) + rule.withWhen([inEnvironment(group.environment)])
+        for group in forgeByEnvironment(principals)
+      ];
 
     authorizationPolicy.new('app-s2s')
     + authorizationPolicy.metadata.withLabels(h.labels(cfg))

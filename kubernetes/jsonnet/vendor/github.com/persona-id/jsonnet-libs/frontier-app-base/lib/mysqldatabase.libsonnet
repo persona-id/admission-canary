@@ -27,8 +27,8 @@ local secretScript = |||
 local grantScript = |||
   set -eu
   i=0
-  while [ "$i" -lt 60 ]; do
-    if mysql --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute="$MYSQL_GRANTS"; then
+  while [ "$i" -lt 30 ]; do
+    if mysql --connect-timeout=10 --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute="$MYSQL_GRANTS"; then
       exit 0
     fi
     i=$((i + 1))
@@ -39,7 +39,7 @@ local grantScript = |||
 
 {
   app(cfg)::
-    local instanceSettings = cfg.mysql.instance;
+    local instanceSettings = h.mysqlInstanceSettings(cfg);
     // abandon (default) leaves the Cloud SQL instance, database, users and
     // IAM objects in GCP when their Kubernetes object is deleted. delete
     // actually deletes them, with no final backup: Config Connector's
@@ -50,11 +50,8 @@ local grantScript = |||
     local accountId = h.mysqlAccountId(cfg);
     local projectId = h.mysqlProjectId(cfg);
     local instanceName = cfg.namespace;
-    local databaseName = cfg.appName;
-    local privateNetwork =
-      if cfg.mysql.privateNetwork == ''
-      then 'projects/%s/global/networks/default' % projectId
-      else cfg.mysql.privateNetwork;
+    local databaseName = h.mysqlAppDatabase(cfg);
+    local privateNetwork = h.mysqlPrivateNetwork(cfg);
     // Datadog routes Cloud SQL monitors by the GCP user label `environment`.
     // The label follows the GCP project, not the app namespace: a -prod
     // namespace in the staging project is still a staging database.
@@ -62,8 +59,7 @@ local grantScript = |||
       if std.endsWith(projectId, '-staging') then 'staging'
       else if h.isProduction(cfg) then 'production'
       else 'development';
-    local iamServiceAccount = '%s@%s.iam.gserviceaccount.com' % [accountId, projectId];
-    local connectionName = '%s:%s:%s' % [projectId, cfg.mysql.region, instanceName];
+    local connectionName = '%s:%s:%s' % [projectId, h.mysqlRegion, instanceName];
     local secretName = '%s-mysql-provisioner' % accountId;
     local labels = h.labels(cfg);
     local cnrmAnnotations = deletionAnnotations { 'cnrm.cloud.google.com/project-id': projectId };
@@ -76,19 +72,210 @@ local grantScript = |||
       { name: db.name, collation: h.get(db, 'collation', cfg.mysql.collation) }
       for db in cfg.mysql.databases
     ];
-    local grantLogins = [accountId] + [mysqlLogin(user) for user in cfg.mysql.users];
-    local grantSql = std.join(' ', [
-      "GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';" % [db.name, login]
+    // The app user gets everything on every database. Each extra user is reset
+    // to exactly its configured grants, so narrowing them takes effect.
+    // Cloud SQL may leave a built-in root@% that every project service account
+    // could reach through the Auth Proxy, so it goes before any grant.
+    // The reset is per database: Cloud SQL's partial revokes keep the
+    // provisioner out of `sys`, so a global REVOKE ALL is refused (error 3879).
+    // MySQL only accepts ALL and GRANT OPTION together in the global form.
+    local resetSql(login, privileges, databases) = std.flattenArrays([
+      [
+        "REVOKE IF EXISTS ALL PRIVILEGES ON `%s`.* FROM '%s'@'%%';" % [db.name, login],
+        "REVOKE IF EXISTS GRANT OPTION ON `%s`.* FROM '%s'@'%%';" % [db.name, login],
+      ]
       for db in databaseSpecs
-      for login in grantLogins
-    ]);
+    ]) + [
+      "GRANT %s ON `%s`.* TO '%s'@'%%';" % [std.join(', ', privileges), db, login]
+      for db in databases
+    ];
+    local grantSql = std.join(' ', ["DROP USER IF EXISTS 'root'@'%';"] + [
+      "GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%';" % [db.name, accountId]
+      for db in databaseSpecs
+    ] + std.flattenArrays([
+      resetSql(mysqlLogin(user), h.mysqlUserPrivileges(user), h.mysqlUserDatabases(cfg, user))
+      for user in cfg.mysql.users
+    ] + [
+      resetSql(h.mysqlAccountIdFor(cfg, c), h.mysqlUserPrivileges(c), h.mysqlUserDatabases(cfg, c))
+      for c in h.mysqlConnections(cfg)
+    ]));
+    // The Google service account, its Workload Identity binding and its IAM
+    // database user, for the app (connection null) or a `mysql.connections` entry.
+    local identity(connection) =
+      local id = h.mysqlAccountIdFor(cfg, connection);
+      {
+        serviceAccount: {
+          apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
+          kind: 'IAMServiceAccount',
+          metadata: {
+            annotations: cnrmAnnotations,
+            labels: labels,
+            name: id,
+          },
+          spec: {
+            displayName: if connection == null then 'Frontier %s MySQL' % cfg.appName else 'Frontier %s MySQL %s' % [cfg.appName, connection.name],
+            resourceID: id,
+          },
+        },
+
+        // Lets the proxy's KSA act as the service account above. Cloud SQL
+        // Auth Proxy IAM login needs that service account's token.
+        iamPolicy: {
+          apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
+          kind: 'IAMPolicy',
+          metadata: {
+            annotations: deletionAnnotations,
+            labels: labels,
+            name: '%s-workload-identity' % id,
+          },
+          spec: {
+            bindings: [{
+              members: [
+                'serviceAccount:%s.svc.id.goog[%s/%s]' % [projectId, cfg.namespace, h.mysqlProxyServiceFor(connection)],
+              ],
+              role: 'roles/iam.workloadIdentityUser',
+            }],
+            resourceRef: {
+              apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
+              kind: 'IAMServiceAccount',
+              name: id,
+            },
+          },
+        },
+
+        user: {
+          apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
+          kind: 'SQLUser',
+          metadata: {
+            annotations: cnrmAnnotations,
+            labels: labels,
+            name: id,
+          },
+          spec: {
+            instanceRef: { name: instanceName },
+            resourceID: '%s@%s.iam.gserviceaccount.com' % [id, projectId],
+            type: 'CLOUD_IAM_SERVICE_ACCOUNT',
+          },
+        },
+      };
+    // The only pods that run as that service account. App pods connect to the
+    // proxy's Service instead of sharing its identity.
+    local proxy(connection) =
+      local name = h.mysqlProxyServiceFor(connection);
+      {
+        proxyServiceAccount: serviceAccount.mysqlProxy(cfg, connection),
+
+        proxyDeployment: {
+          apiVersion: 'apps/v1',
+          kind: 'Deployment',
+          metadata: {
+            // The Frontier Datadog agent turns these into owner_* tags on
+            // kubernetes_state.deployment.*, so a proxy-down alert reaches the
+            // owner the same way the Cloud SQL instance alerts do.
+            labels: labels + {
+              ['frontier.withpersona.com/' + key]: value
+              for key in std.objectFields(h.mysqlOwnerLabels(cfg))
+              for value in [h.mysqlOwnerLabels(cfg)[key]]
+            },
+            name: name,
+          },
+          spec: {
+            replicas: 2,
+            selector: {
+              matchLabels: { 'frontier.withpersona.com/workload': name },
+            },
+            template: {
+              metadata: {
+                // The proxy receives this through mysql-connection as an env var.
+                // Changing its GCP project or instance must restart existing pods.
+                annotations: {
+                  'frontier.withpersona.com/mysql-connection-name': connectionName,
+                },
+                labels: labels { 'frontier.withpersona.com/workload': name },
+              },
+              spec: {
+                containers: [h.mysqlProxyContainer(cfg)],
+                serviceAccountName: name,
+                // Longer than proxy.shutdownDelaySeconds so the process can
+                // finish closing connections before the pod is killed.
+                terminationGracePeriodSeconds: cfg.mysql.proxy.shutdownDelaySeconds + 15,
+                // The two replicas prefer different nodes, so one drain
+                // doesn't stop both.
+                affinity: {
+                  podAntiAffinity: {
+                    preferredDuringSchedulingIgnoredDuringExecution: [{
+                      weight: 100,
+                      podAffinityTerm: {
+                        labelSelector: { matchLabels: { 'frontier.withpersona.com/workload': name } },
+                        topologyKey: 'kubernetes.io/hostname',
+                      },
+                    }],
+                  },
+                },
+              },
+            },
+          },
+        },
+
+        // At most one replica is evicted at a time, so a drain always leaves
+        // one proxy serving.
+        proxyDisruptionBudget: {
+          apiVersion: 'policy/v1',
+          kind: 'PodDisruptionBudget',
+          metadata: {
+            labels: labels,
+            name: name,
+          },
+          spec: {
+            maxUnavailable: 1,
+            selector: { matchLabels: { 'frontier.withpersona.com/workload': name } },
+          },
+        },
+
+        // MySQL speaks first. Under PERMISSIVE mTLS the proxy's sidecar waits for
+        // the client's first bytes to detect TLS while the client waits for the
+        // server greeting, so every connection through the Service times out.
+        proxyPeerAuthentication: {
+          apiVersion: 'security.istio.io/v1',
+          kind: 'PeerAuthentication',
+          metadata: {
+            labels: labels,
+            name: '%s-mtls-strict' % name,
+          },
+          spec: {
+            mtls: { mode: 'STRICT' },
+            selector: { matchLabels: { 'frontier.withpersona.com/workload': name } },
+          },
+        },
+
+        proxyService: {
+          apiVersion: 'v1',
+          kind: 'Service',
+          metadata: {
+            labels: labels,
+            name: name,
+          },
+          spec: {
+            ports: [{
+              // A tcp- name makes the port opaque TCP, so Istio never waits to sniff the protocol.
+              name: 'tcp-mysql',
+              port: cfg.mysql.proxy.port,
+              targetPort: cfg.mysql.proxy.port,
+            }],
+            selector: { 'frontier.withpersona.com/workload': name },
+          },
+        },
+      };
+    // Always abandoned: deleting the instance already drops its databases, and
+    // Config Connector deletes a database through its instance, so a database
+    // pruned alongside a deleted instance would wait on it forever.
     local sqlDatabase(db) = {
       apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
       kind: 'SQLDatabase',
       metadata: {
-        annotations: cnrmAnnotations,
+        annotations: cnrmAnnotations { 'cnrm.cloud.google.com/deletion-policy': 'abandon' },
         labels: labels,
-        name: db.name,
+        name: h.mysqlDatabaseObjectName(db.name),
       },
       spec: {
         charset: 'utf8mb4',
@@ -99,44 +286,8 @@ local grantScript = |||
     };
 
     {
-      serviceAccount: {
-        apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
-        kind: 'IAMServiceAccount',
-        metadata: {
-          annotations: cnrmAnnotations,
-          labels: labels,
-          name: accountId,
-        },
-        spec: {
-          displayName: 'Frontier %s MySQL' % cfg.appName,
-          resourceID: accountId,
-        },
-      },
-
-      // Lets the cloud-sql-proxy KSA act as the service account above. Cloud SQL
-      // Auth Proxy IAM login needs that service account's token.
-      iamPolicy: {
-        apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
-        kind: 'IAMPolicy',
-        metadata: {
-          annotations: deletionAnnotations,
-          labels: labels,
-          name: '%s-workload-identity' % accountId,
-        },
-        spec: {
-          bindings: [{
-            members: [
-              'serviceAccount:%s.svc.id.goog[%s/%s]' % [projectId, cfg.namespace, h.mysqlProxyService],
-            ],
-            role: 'roles/iam.workloadIdentityUser',
-          }],
-          resourceRef: {
-            apiVersion: 'iam.cnrm.cloud.google.com/v1beta1',
-            kind: 'IAMServiceAccount',
-            name: accountId,
-          },
-        },
-      },
+      serviceAccount: identity(null).serviceAccount,
+      iamPolicy: identity(null).iamPolicy,
 
       instance: {
         apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
@@ -150,8 +301,8 @@ local grantScript = |||
           name: instanceName,
         },
         spec: {
-          databaseVersion: 'MYSQL_8_0',
-          region: cfg.mysql.region,
+          databaseVersion: cfg.mysql.version,
+          region: h.mysqlRegion,
           resourceID: instanceName,
           settings: {
             activationPolicy: 'ALWAYS',
@@ -166,10 +317,14 @@ local grantScript = |||
               startTime: '14:00',
               transactionLogRetentionDays: 7,
             },
+            // IAM login is always on. performance_schema defaults to off, for
+            // the small shared-core tier, unless databaseFlags sets it.
             databaseFlags: [
               { name: 'cloudsql_iam_authentication', value: 'on' },
-              { name: 'performance_schema', value: 'off' },
-            ],
+            ] + (
+              if std.member([h.get(f, 'name', '') for f in cfg.mysql.instance.databaseFlags], 'performance_schema') then []
+              else [{ name: 'performance_schema', value: 'off' }]
+            ) + cfg.mysql.instance.databaseFlags,
             deletionProtectionEnabled: cfg.mysql.instance.deletionPolicy != 'delete',
             diskAutoresize: true,
             diskAutoresizeLimit: instanceSettings.diskAutoresizeLimit,
@@ -316,12 +471,14 @@ local grantScript = |||
         if db.name != databaseName
       },
 
+      // Removing an entry deletes the MySQL user and its grants, whatever the
+      // instance's deletionPolicy: a person's access shouldn't outlive the config.
       extraUsers: {
         [user.name]: {
           apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
           kind: 'SQLUser',
           metadata: {
-            annotations: cnrmAnnotations,
+            annotations: { 'cnrm.cloud.google.com/project-id': projectId },
             labels: labels,
             name: user.name,
           },
@@ -334,23 +491,10 @@ local grantScript = |||
         for user in cfg.mysql.users
       },
 
-      user: {
-        apiVersion: 'sql.cnrm.cloud.google.com/v1beta1',
-        kind: 'SQLUser',
-        metadata: {
-          annotations: cnrmAnnotations,
-          labels: labels,
-          name: accountId,
-        },
-        spec: {
-          instanceRef: { name: instanceName },
-          resourceID: iamServiceAccount,
-          type: 'CLOUD_IAM_SERVICE_ACCOUNT',
-        },
-      },
+      user: identity(null).user,
 
       // Uses the built-in provisioner only to grant the app IAM user access to
-      // its own database. Retries until Cloud SQL has finished creating both.
+      // its own database. This waits up to five minutes for IAM propagation.
       grantJob: {
         apiVersion: 'batch/v1',
         kind: 'Job',
@@ -358,14 +502,16 @@ local grantScript = |||
           annotations: {
             'argocd.argoproj.io/hook': 'Sync',
             'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
-            'argocd.argoproj.io/sync-wave': '0',
+            // Wait for Config Connector's wave 0 objects first. An admission
+            // denial must fail this sync before this hook starts retrying.
+            'argocd.argoproj.io/sync-wave': '1',
           },
           labels: labels,
           name: '%s-mysql-grants' % accountId,
         },
         spec: {
-          activeDeadlineSeconds: 2400,
-          backoffLimit: 2,
+          activeDeadlineSeconds: 360,
+          backoffLimit: 0,
           template: {
             metadata: {
               labels: labels { 'app.kubernetes.io/name': 'frontier-mysql-provisioner' },
@@ -388,7 +534,7 @@ local grantScript = |||
                   runAsNonRoot: true,
                 },
                 startupProbe: {
-                  failureThreshold: 1800,
+                  failureThreshold: 300,
                   httpGet: { path: '/startup', port: 9091 },
                   periodSeconds: 1,
                 },
@@ -414,53 +560,18 @@ local grantScript = |||
         },
       },
 
-      // The only pod that runs as the MySQL Google service account. App pods
-      // connect to its Service instead of sharing this identity. The grant job
-      // above keeps its own loopback proxy, because that client shares the pod.
-      proxyServiceAccount: serviceAccount.mysqlProxy(cfg),
+      // The grant job above keeps its own loopback proxy, because that client
+      // shares the pod.
+      proxyServiceAccount: proxy(null).proxyServiceAccount,
+      proxyDeployment: proxy(null).proxyDeployment,
+      proxyDisruptionBudget: proxy(null).proxyDisruptionBudget,
+      proxyPeerAuthentication: proxy(null).proxyPeerAuthentication,
+      proxyService: proxy(null).proxyService,
 
-      proxyDeployment: {
-        apiVersion: 'apps/v1',
-        kind: 'Deployment',
-        metadata: {
-          labels: labels,
-          name: h.mysqlProxyService,
-        },
-        spec: {
-          replicas: 2,
-          selector: {
-            matchLabels: { 'frontier.withpersona.com/workload': h.mysqlProxyService },
-          },
-          template: {
-            metadata: {
-              labels: labels { 'frontier.withpersona.com/workload': h.mysqlProxyService },
-            },
-            spec: {
-              containers: [h.mysqlProxyContainer(cfg)],
-              serviceAccountName: h.mysqlProxyService,
-              // Longer than proxy.maxSigtermDelay so the process can finish
-              // closing connections before the pod is killed.
-              terminationGracePeriodSeconds: 45,
-            },
-          },
-        },
-      },
-
-      proxyService: {
-        apiVersion: 'v1',
-        kind: 'Service',
-        metadata: {
-          labels: labels,
-          name: h.mysqlProxyService,
-        },
-        spec: {
-          ports: [{
-            name: 'mysql',
-            port: cfg.mysql.proxy.port,
-            targetPort: cfg.mysql.proxy.port,
-          }],
-          selector: { 'frontier.withpersona.com/workload': h.mysqlProxyService },
-        },
+      // Each `mysql.connections` entry: its own identity, IAM user and proxy.
+      connections: {
+        [c.name]: identity(c) + proxy(c)
+        for c in h.mysqlConnections(cfg)
       },
 
       connection: {

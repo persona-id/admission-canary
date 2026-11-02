@@ -5,9 +5,9 @@ frontier.toList(frontier.new({
   appName: 'bad-deletion-policy',
   namespace: 'frontier-bad-deletion-policy-dev',
   permissions: { owner: 'owner' },
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
     instance: { deletionPolicy: 'drop' },
   },
 }))

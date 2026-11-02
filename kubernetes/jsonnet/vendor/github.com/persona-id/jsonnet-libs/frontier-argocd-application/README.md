@@ -31,7 +31,7 @@ argo-cd-libsonnet is generated per ArgoCD minor version, and its newest is 3.2. 
 
 ### A repo built from persona-template-frontier-app
 
-`newFrontierApp(env, config, repoURL, targetRevision)` is the Application for one
+`newFrontierApp(env, config, repoURL, targetRevision, autoSync=true, gcpProject='')` is the Application for one
 environment of a repo built from the template:
 
 - It renders `kubernetes/jsonnet/<env>/main.jsonnet`, and only that file.
@@ -39,6 +39,15 @@ environment of a repo built from the template:
   is committed, because ArgoCD does not run `jb install`.
 - It passes the `imageTag` top-level argument as `$ARGOCD_APP_REVISION`, the commit
   sha `targetRevision` resolved to.
+- With `gcpProject` set, it also passes that as the `gcpProject` top-level argument.
+  The cluster's Argo CD gives `kubernetes/deploy` its GCP project the same way, so a
+  deploy file that is a function forwards it:
+  `function(gcpProject='') argocd.newFrontierApp(..., gcpProject=gcpProject)`.
+  frontier-app-base's managed MySQL uses it for its project, Workload Identity pool
+  and network. Left empty, nothing extra is passed.
+- A failed sync is retried five times, from 10 seconds up to 3 minutes apart, so a
+  sync that fails on something that settles by itself doesn't wait for the next
+  commit.
 
 `config` is the environment's `config.libsonnet`. The Application is named after its
 `releaseName`, or `appName` when that is unset, and deploys to its `namespace`.

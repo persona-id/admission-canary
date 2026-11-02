@@ -5,9 +5,9 @@ frontier.toList(frontier.new({
   appName: 'bad-db',
   namespace: 'frontier-bad-db-dev',
   permissions: { owner: 'owner' },
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
     databases: [{ name: 'mysql' }],
   },
 }))

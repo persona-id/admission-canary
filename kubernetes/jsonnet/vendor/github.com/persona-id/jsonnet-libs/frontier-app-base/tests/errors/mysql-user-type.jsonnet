@@ -5,9 +5,9 @@ frontier.toList(frontier.new({
   appName: 'bad-user',
   namespace: 'frontier-bad-user-dev',
   permissions: { owner: 'owner' },
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
     users: [{ name: 'reader', type: 'BUILTIN', email: 'reader@withpersona.com' }],
   },
 }))

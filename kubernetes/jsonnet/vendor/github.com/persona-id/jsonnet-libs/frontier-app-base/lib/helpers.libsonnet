@@ -35,13 +35,15 @@ local sizes = {
   // Follows Knative's config-domain on frontier-us-central1.
   appURL(cfg):: 'https://app-%s.%s.frontier.withpersona.app' % [cfg.namespace, cfg.visibility],
 
-  // A Frontier cluster keeps every app database in one GCP project. Dev
-  // namespaces run on the staging cluster, prod namespaces on the production
-  // cluster. An app can still set mysql.projectId when that is not true.
-  mysqlProjectId(cfg)::
-    if cfg.mysql.projectId != '' then cfg.mysql.projectId
-    else if $.isProduction(cfg) then 'persona-frontier'
-    else 'persona-frontier-staging',
+  // A Frontier cluster keeps every app database in its own GCP project, which
+  // Argo CD passes as gcpProject. Both dev and prod namespaces registered with
+  // that cluster run there. An app can't choose another project.
+  mysqlProjectId(cfg):: $.get(cfg, 'gcpProject', 'persona-frontier'),
+
+  // The cluster's admission policy accepts only this region and the project's
+  // default VPC.
+  mysqlRegion:: 'us-central1',
+  mysqlPrivateNetwork(cfg):: 'projects/%s/global/networks/default' % $.mysqlProjectId(cfg),
 
   // Cloud IAM service account IDs are limited to 30 characters. Validation
   // rejects an enabled MySQL namespace that is not frontier-* or is longer
@@ -51,9 +53,56 @@ local sizes = {
     local app = if std.startsWith(cfg.namespace, namespacePrefix) then std.substr(cfg.namespace, std.length(namespacePrefix), std.length(cfg.namespace)) else cfg.namespace;
     'app-' + app,
 
+  // The app's own database: mysql.databaseName, or appName.
+  mysqlAppDatabase(cfg):: $.get(cfg.mysql, 'databaseName', cfg.appName),
+
+  // Every database on the app's instance: the app's own first.
+  mysqlDatabaseNames(cfg):: [$.mysqlAppDatabase(cfg)] + [$.get(db, 'name', '') for db in cfg.mysql.databases],
+
+  // A MySQL database name may hold underscores; a Kubernetes object name can't,
+  // so the SQLDatabase object is named with dashes and keeps the real name in
+  // resourceID.
+  mysqlDatabaseObjectName(name):: std.strReplace(name, '_', '-'),
+
+  // The privileges a `mysql.users` entry has on each of its databases.
+  mysqlUserPrivileges(user):: $.get(user, 'privileges', ['SELECT']),
+
+  // The databases a `mysql.users` entry is granted on.
+  mysqlUserDatabases(cfg, user):: $.get(user, 'databases', $.mysqlDatabaseNames(cfg)),
+
+  // What a `mysql.users` entry's privileges may contain. Nothing here reaches
+  // beyond the databases it is granted on.
+  mysqlUserPrivilegeNames:: [
+    'ALL PRIVILEGES',
+    'ALTER',
+    'CREATE',
+    'CREATE TEMPORARY TABLES',
+    'CREATE VIEW',
+    'DELETE',
+    'DROP',
+    'EXECUTE',
+    'INDEX',
+    'INSERT',
+    'LOCK TABLES',
+    'REFERENCES',
+    'SELECT',
+    'SHOW VIEW',
+    'TRIGGER',
+    'UPDATE',
+  ],
+
   // In-namespace Service the app connects to. The proxy pod is the only one
   // that runs as the MySQL Google service account.
   mysqlProxyService: 'cloud-sql-proxy',
+
+  // A `mysql.connections` entry is another MySQL identity for the same app, such
+  // as a read-only one, with its own Google service account and proxy. Its
+  // account id is the app's plus "-<name>"; a name has no dashes and is never
+  // dev or prod, so it can't equal another namespace's derived account.
+  mysqlConnections(cfg):: if std.isArray(cfg.mysql.connections) then cfg.mysql.connections else [],
+  mysqlAccountIdFor(cfg, connection):: if connection == null then $.mysqlAccountId(cfg) else '%s-%s' % [$.mysqlAccountId(cfg), connection.name],
+  mysqlProxyServiceFor(connection):: if connection == null then $.mysqlProxyService else '%s-%s' % [$.mysqlProxyService, connection.name],
+  mysqlConnectionEnvPrefix(connection):: 'MYSQL_' + std.asciiUpper(connection.name),
 
   // Its own pod, reached through the cloud-sql-proxy Service.
   mysqlProxyContainer(cfg)::
@@ -68,7 +117,7 @@ local sizes = {
         '--health-check',
         '--http-address=0.0.0.0',
         '--http-port=9091',
-        '--max-sigterm-delay=%s' % cfg.mysql.proxy.maxSigtermDelay,
+        '--max-sigterm-delay=%ds' % cfg.mysql.proxy.shutdownDelaySeconds,
         '--private-ip',
         '--structured-logs',
         '--port=%d' % cfg.mysql.proxy.port,
@@ -115,6 +164,39 @@ local sizes = {
   // A `gcsStorageBuckets` entry's bucket name, shared by its StorageBucket and IAMPartialPolicy.
   bucketName(item):: 'persona-frontier-%s' % $.normalize(item.name),
 
+  // A Forge principal, `<prefix>/<forge-app>` or `<prefix>/<forge-app>@<environment>`
+  // for a prefix in `forgeIdentity.issuers` or `forgeIdentity.aliases`, as
+  // `{ prefix, name, environment }` with an alias resolved to its issuer key and
+  // the environment `production` when none is written; null for anything else.
+  // `name` is the app, the pass's `sub`; the environment is its
+  // `forge_environment` claim. That is persona-frontier-gateway's contract since
+  // persona-frontier-gateway#19: it signs `sub` as the stamped app (the repo, the
+  // same in every environment) and refuses a binding without a stamped
+  // environment, so every pass it signs carries `forge_environment`.
+  forgePrincipal(cfg, p)::
+    local issuers = cfg.forgeIdentity.issuers;
+    local aliases = std.get(cfg.forgeIdentity, 'aliases', {});
+    local slash = if std.isString(p) then std.findSubstr('/', p) else [];
+    local written = if slash == [] then '' else std.substr(p, 0, slash[0]);
+    local qualified = if slash == [] then '' else std.substr(p, slash[0] + 1, std.length(p));
+    local at = std.findSubstr('@', qualified);
+    local name = if at == [] then qualified else std.substr(qualified, 0, at[0]);
+    local environment = if at == [] then 'production' else std.substr(qualified, at[0] + 1, std.length(qualified));
+    local prefix =
+      if std.objectHas(issuers, written) then written
+      else if std.objectHas(aliases, written) && std.objectHas(issuers, aliases[written]) then aliases[written]
+      else '';
+    if prefix != '' && name != '' then { prefix: prefix, name: name, environment: environment } else null,
+
+  // A Forge app or environment name: lowercase letters, digits and hyphens.
+  isForgeName(s):: s != '' && std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-', c) for c in std.stringChars(s)]),
+
+  // The Istio request principal a Forge principal's pass arrives as: the app,
+  // the same in every environment.
+  forgeRequestPrincipal(cfg, p)::
+    local f = $.forgePrincipal(cfg, p);
+    '%s/%s' % [cfg.forgeIdentity.issuers[f.prefix].issuer, f.name],
+
   // `delegatedCallers` without repeats, keeping the first of each. Anything not a
   // list of strings is left to validation.libsonnet to reject.
   delegatedCallers(cfg)::
@@ -155,7 +237,15 @@ local sizes = {
            name: 'MYSQL_USER',
            valueFrom: { configMapKeyRef: { key: 'user', name: 'mysql-connection' } },
          },
-       ] else [])
+       ] + std.flattenArrays([
+         local prefix = $.mysqlConnectionEnvPrefix(c);
+         [
+           envVar.new(prefix + '_HOST', $.mysqlProxyServiceFor(c)),
+           envVar.new(prefix + '_PORT', std.toString(cfg.mysql.proxy.port)),
+           envVar.new(prefix + '_USER', $.mysqlAccountIdFor(cfg, c)),
+         ]
+         for c in $.mysqlConnections(cfg)
+       ]) else [])
     + (if $.get(cfg.source, 'revision', '') != '' then [envVar.new('DD_GIT_COMMIT_SHA', std.toString(cfg.source.revision))] else [])
     + (if $.get(cfg.source, 'repository', '') != '' then [envVar.new('DD_GIT_REPOSITORY_URL', std.toString(cfg.source.repository))] else [])
     + [envVar.new(e.name, std.toString(e.value)) for e in cfg.env + extra],
@@ -172,6 +262,12 @@ local sizes = {
   inClusterHosts(cfg):: ['app.%s' % cfg.namespace, 'app.%s.svc' % cfg.namespace, 'app.%s.svc.cluster.local' % cfg.namespace],
 
   isProduction(cfg):: std.endsWith(cfg.namespace, '-prod'),
+
+  // An empty tier starts production on a dedicated machine and development on
+  // shared-core. Any tier set explicitly is kept, in either environment.
+  mysqlInstanceSettings(cfg)::
+    if $.get(cfg.mysql.instance, 'tier', '') != '' then cfg.mysql.instance
+    else cfg.mysql.instance { tier: if $.isProduction(cfg) then 'db-custom-1-3840' else 'db-g1-small' },
 
   // Common labels for everything the library renders.
   labels(cfg):: {
@@ -447,6 +543,16 @@ local sizes = {
 
   // A worker's or scheduled job's own `computeClass` wins over the app's.
   workloadPlacement(cfg, workload):: $.placement(cfg, std.get(workload, 'computeClass', cfg.computeClass)),
+
+  // Resources for the web container: `service.size` picks a tier and
+  // `service.resources` merges over it. {} when neither is set.
+  webResources(cfg)::
+    local size = $.get(cfg.service, 'size', '');
+    local overrides = $.get(cfg.service, 'resources', {});
+    assert size == '' || std.objectHas(sizes, size) :
+           'service.size "%s" is not one of small, medium and large.' % size;
+    if size == '' && overrides == {} then {}
+    else std.mergePatch(if size == '' then {} else sizes[size], overrides),
 
   // Resources for a worker or scheduled job. `size` picks a tier and `resources`
   // merges over it.

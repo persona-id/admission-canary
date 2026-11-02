@@ -4,7 +4,7 @@ local cfg = import '../../config.libsonnet';
 local namespace = import '../../lib/namespace.libsonnet';
 
 local withoutMysql = cfg { appName: 'demo', namespace: 'frontier-demo-prod' };
-local withMysql = withoutMysql { mysql+: { enabled: true, projectId: 'persona-frontier-staging' } };
+local withMysql = withoutMysql { gcpProject: 'persona-frontier-staging', mysql+: { enabled: true } };
 
 {
   apiVersion: 'v1',
