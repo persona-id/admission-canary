@@ -22,10 +22,11 @@ local serviceAccount = (import 'libs.libsonnet').k.core.v1.serviceAccount;
   // The Cloud SQL proxy's identity. Workload Identity is the pod's ServiceAccount,
   // so this has to be a different pod from the app or the app would hold the same
   // Google service account.
-  mysqlProxy(cfg)::
-    serviceAccount.new(h.mysqlProxyService)
+  // `connection` is a `mysql.connections` entry, or null for the app's own.
+  mysqlProxy(cfg, connection=null)::
+    serviceAccount.new(h.mysqlProxyServiceFor(connection))
     + serviceAccount.metadata.withAnnotations({
-      'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountId(cfg), h.mysqlProjectId(cfg)],
+      'iam.gke.io/gcp-service-account': '%s@%s.iam.gserviceaccount.com' % [h.mysqlAccountIdFor(cfg, connection), h.mysqlProjectId(cfg)],
     })
     + serviceAccount.metadata.withLabels(h.labels(cfg)),
 

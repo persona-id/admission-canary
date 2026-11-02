@@ -32,9 +32,6 @@ local common = import '../common/config.libsonnet';
 
   mysql: {
     enabled: true,
-    // This namespace ends in -prod, which would select the persona-frontier
-    // project. The canary production app runs on the staging cluster.
-    projectId: 'persona-frontier-staging',
     // The other collation from dev, on the app database. The extra database
     // uses utf8mb4_0900_ai_ci.
     collation: 'utf8mb4_unicode_ci',

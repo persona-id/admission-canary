@@ -35,6 +35,14 @@
   // one development cluster.
   clusterEnvironment: 'development',
 
+  // The GCP project of the Frontier cluster rendering the app. Argo CD passes it
+  // as the gcpProject top-level argument, and the template's main.jsonnet copies
+  // it here, so leave it out of config files. Managed MySQL's project, Workload
+  // Identity pool and private network all follow it. Empty means
+  // persona-frontier. The instance always runs in us-central1 on the project's
+  // default VPC: the cluster's admission policy accepts nothing else.
+  gcpProject: '',
+
   // Stands in for Helm's `.Release.Name` in the `app.kubernetes.io/instance` label.
   // Defaults to `appName`.
   releaseName: '',
@@ -58,10 +66,18 @@
   //           and `x-auth-request-groups` headers.
   //   frontierApps: namespaces of Frontier apps that may call these paths, e.g.
   //           `frontier-some-app-prod`.
-  //   principals: other callers. `forge/<forge-app>` is one named Forge
-  //           (Cloudflare Worker) app, proven by its signed pass. Forge's deploy
-  //           sets the name: `<repo>` in staging, `<repo>-prod` in production;
-  //           Oracle has one environment and is `forge/persona-cf-app-oracle`.
+  //   principals: other callers. `forge-internal/<forge-app>` is the production
+  //           Worker of one Forge (Cloudflare Worker) app in the Internal Apps
+  //           account, proven by its signed pass; `forge-external/<forge-app>` is
+  //           one in the External Apps account (see `forgeIdentity.issuers`).
+  //           `<forge-app>` is the app's repo, which Forge's deploy stamps; add
+  //           `@<environment>` for another of its Workers, e.g.
+  //           `forge-external/persona-dashboard-onboard@staging`. Oracle has one
+  //           Worker, `forge-internal/persona-cf-app-oracle`. `forge/` is a
+  //           deprecated alias for `forge-internal/`. The app sees the name in
+  //           `x-forge-caller`, the environment in `x-forge-environment` and the
+  //           signer in `x-forge-issuer`; a route admitting both prefixes must
+  //           check the issuer, since the same name can exist in each account.
   //           Anything else is a full `spiffe://` identity, e.g. a workload in
   //           another cluster.
   //   Callers must use http://app.<this-namespace>.svc.cluster.local; a call
@@ -72,20 +88,43 @@
   //   for a person).
   //
   //   [
-  //     { paths: ['/api/internal/*'], humans: 'none', frontierApps: ['frontier-some-app-prod'], principals: ['forge/persona-cf-app-oracle'] },
+  //     { paths: ['/api/internal/*'], humans: 'none', frontierApps: ['frontier-some-app-prod'], principals: ['forge-internal/persona-cf-app-oracle'] },
   //     { paths: ['/*'], humans: 'okta', groups: ['Role-Engineering'] },
   //   ]
   //
   // Replaces the deprecated `auth` keys below.
   routes: [],
 
-  // How `forge/<forge-app>` callers are verified: the Worker that signs their
-  // tokens, and the gateway listener their requests arrive through. Cluster-wide
-  // values; apps should not need to touch these.
+  // How Forge callers are verified: the Worker that signs their passes, by the
+  // principal prefix routes name them with, and the gateway listener their
+  // requests arrive through. Cluster-wide values; apps should not need to touch
+  // these.
   forgeIdentity: {
-    issuer: 'https://persona-cf-app-forge-identity-prod.persona-app.workers.dev',
-    // Inline, so istiod fetches nothing and the Worker needs no public endpoint.
-    jwks: '{"keys":[{"alg":"ES256","crv":"P-256","kid":"persona-cf-app-forge-identity.UaiwbHC9ncPRNLvyu7xqkgaaShz-JFDynppBLQwWtUE","kty":"EC","use":"sig","x":"IXebg7TgZyIOYe-FXmcDbYSDmKMDijZVVPoitcWAp3U","y":"Lrhm0qqB0BJ2YYBg9zim1bjeG85Wy4y0lRymToMpPYo"}]}',
+    // `<prefix>/<forge-app>` admits a pass from `issuer` whose `sub` is
+    // `<forge-app>`. Each Cloudflare account has its own signer and prefix, so a
+    // Worker in one account can never pass as one with the same name in another.
+    // Keys are inline, so istiod fetches nothing and the Worker needs no public
+    // endpoint.
+    issuers: {
+      // Internal Apps. Holds persona-cf-app-forge-identity's key and
+      // persona-frontier-gateway's, which signs passes under the same issuer
+      // while callers move to it.
+      'forge-internal': {
+        issuer: 'https://persona-cf-app-forge-identity-prod.persona-app.workers.dev',
+        jwks: '{"keys":[{"alg":"ES256","crv":"P-256","kid":"persona-cf-app-forge-identity.UaiwbHC9ncPRNLvyu7xqkgaaShz-JFDynppBLQwWtUE","kty":"EC","use":"sig","x":"IXebg7TgZyIOYe-FXmcDbYSDmKMDijZVVPoitcWAp3U","y":"Lrhm0qqB0BJ2YYBg9zim1bjeG85Wy4y0lRymToMpPYo"},{"alg":"ES256","crv":"P-256","kid":"persona-frontier-gateway.6OUt_f2LTk0af6ibV7dI8ymbjKbsg9_teFfzxQVP94M","kty":"EC","use":"sig","x":"s1YarfkmBNSKNgVRA1qMyLnblEuNLBEmO0Qg7HJ-D1U","y":"SjlRckaUrl8vTXdwYUKWc67N_Szr6OyHqEJZ3nEWxnk"}]}',
+      },
+      // External Apps: persona-frontier-gateway's deployment in that account.
+      'forge-external': {
+        issuer: 'https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev',
+        jwks: '{"keys":[{"alg":"ES256","crv":"P-256","kid":"persona-frontier-gateway-external.QFUIJisQDc23fJkd_T599rbDOm70lbNvYb9oPPzaiDA","kty":"EC","use":"sig","x":"hT5LyLfenHCjRK1opo8zE7jYU_OQXQbPRAYP1tDvoI8","y":"JE4WN-I7kvqcLIA5q3RON-DCbdXXt_NUKUuNk8WZILc"}]}',
+      },
+    },
+    // Deprecated prefixes, each resolved to an issuer key. `forge/` was the
+    // Internal Apps prefix; it keeps existing routes rendering until they move to
+    // `forge-internal/`.
+    aliases: {
+      forge: 'forge-internal',
+    },
     gateway: 'istio-gateways/istio-forge-gateway',
     gatewayPrincipal: 'cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal',
   },
@@ -105,9 +144,12 @@
   // `x-forge-caller`, and those headers are removed from every request before
   // the pass is checked, so a caller cannot set them.
   //
-  // The trust boundary is the identity service (`forgeIdentity.issuer`): it
+  // The trust boundary is the identity service (`forgeIdentity.issuers['forge-internal']`): it
   // checks the claims' syntax, types and bounds before signing. An Istio
   // AuthorizationPolicy can only match claim values, not validate their shape.
+  //
+  // Entries name an app's production Worker unless they add `@<environment>`,
+  // as in `principals`.
   //
   // Listing `forge/persona-cf-app-oracle` labels the Knative Service
   // `frontier.withpersona.com/oracle-access: "true"`. The label is for
@@ -381,35 +423,61 @@
   // is exposed to the app.
   mysql: {
     enabled: false,
-    // Empty selects the project from the namespace: persona-frontier for a
-    // -prod namespace, persona-frontier-staging otherwise. Set it when the
-    // namespace and the cluster's project disagree.
-    projectId: '',
-    region: 'us-central1',
-    // Empty selects this project's default VPC. Set a full network resource name
-    // when the instance should use another VPC.
-    privateNetwork: '',
-    // Collation of the database named after appName. An entry in `databases`
+    // MYSQL_8_0 or MYSQL_8_4. Cloud SQL upgrades a major version in place but
+    // never downgrades one.
+    version: 'MYSQL_8_0',
+    // The app's own database. Empty names it after appName. A MySQL name, so
+    // underscores are allowed, e.g. an existing Rails app's <app>_production.
+    databaseName: '',
+    // Collation of the app's own database. An entry in `databases`
     // may set its own. utf8mb4_unicode_ci matches schemas that already use it.
     collation: 'utf8mb4_0900_ai_ci',
     // Databases besides the one named after appName, on the same instance.
     // Each entry is { name, collation? }.
     databases: [],
     // IAM database users besides the app's generated service account. Each
-    // entry is { name, type, email }. type is CLOUD_IAM_USER,
-    // CLOUD_IAM_SERVICE_ACCOUNT or CLOUD_IAM_GROUP. Password users are not
-    // accepted: Cloud SQL makes those superusers.
+    // entry is { name, type, email, privileges?, databases? }. type is
+    // CLOUD_IAM_USER, CLOUD_IAM_SERVICE_ACCOUNT or CLOUD_IAM_GROUP. A person or
+    // group must be @withpersona.com. A service account must belong to this
+    // environment's Frontier project. Password users are not accepted: Cloud
+    // SQL makes those superusers.
+    //
+    // privileges defaults to ['SELECT']; ['ALL PRIVILEGES'] or any of SELECT,
+    // INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES,
+    // CREATE VIEW, SHOW VIEW, TRIGGER, EXECUTE, CREATE TEMPORARY TABLES and
+    // LOCK TABLES widen it. databases defaults to every database on the
+    // instance. Every sync resets each listed user to exactly these grants,
+    // and removing an entry deletes that MySQL user.
+    //
+    // A person or group also needs the Cloud SQL login roles in the Frontier
+    // project, and connects from somewhere that routes to the instance's
+    // private IP. A service account in the project already has them. See the
+    // README.
     users: [],
+
+    // More MySQL identities for the app itself, besides its default one, each
+    // with its own Google service account, proxy and grants. Each entry is
+    // { name, privileges?, databases? }, with the defaults of `users`. The app
+    // reaches one at MYSQL_<NAME>_HOST:MYSQL_<NAME>_PORT as MYSQL_<NAME>_USER,
+    // e.g. { name: 'ro' } for a read-only connection standing in for a replica.
+    // A name is lowercase letters and digits, not dev or prod, and short enough
+    // that app-<namespace without frontier->-<name> fits 30 characters.
+    connections: [],
+
     instance: {
-      // Shared-core machine. It cannot be highly available. Raise `tier` to
-      // db-custom-1-3840, db-custom-2-7680 or db-custom-4-15360 to scale up,
-      // and set availabilityType to REGIONAL for a standby. Both changes
-      // restart the instance. Disk can grow up to diskAutoresizeLimit and
-      // cannot shrink.
-      tier: 'db-g1-small',
+      // Empty starts development on shared-core db-g1-small and production on
+      // dedicated db-custom-1-3840. Any tier can be set in either. Raise a
+      // dedicated tier to db-custom-2-7680 or db-custom-4-15360 to scale up,
+      // and set availabilityType to REGIONAL for a standby. Both changes restart
+      // the instance. Disk can grow up to diskAutoresizeLimit and cannot shrink.
+      tier: '',
       availabilityType: 'ZONAL',
       diskSize: 10,
       diskAutoresizeLimit: 100,
+      // Extra MySQL flags, { name, value }, from the names validation accepts
+      // (see the README). cloudsql_iam_authentication is always on and can't
+      // be set here; performance_schema is off unless set here.
+      databaseFlags: [],
 
       // abandon (default) leaves the Cloud SQL instance, database, users and
       // IAM objects in GCP when their Kubernetes object is deleted. delete
@@ -424,8 +492,12 @@
 
     proxy: {
       image: 'us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28',
-      // Stay under the proxy pod's 45s termination grace.
-      maxSigtermDelay: '30s',
+      // How long the proxy keeps serving open connections after it is asked to
+      // stop, in seconds. It exits as soon as they close, so an idle proxy stops
+      // at once. 290 matches stack-core's sidecar, longer than a Sidekiq
+      // worker's usual shutdown, so a draining job can finish its writes. The
+      // pod's termination grace is 15 seconds more.
+      shutdownDelaySeconds: 290,
       port: 3306,
     },
 
@@ -495,6 +567,11 @@
   // Service configuration.
   service: {
     port: 8080,
+    // Optional: the web container's resources, the same tiers as
+    // `backgroundJobs.defaultSize` (small, medium, large), with `resources` merged
+    // over the tier. Neither set leaves the container without requests or limits.
+    size: '',
+    resources: {},
   },
 
   // Projected ServiceAccount token volumes. Each entry mounts a kubelet-rotated

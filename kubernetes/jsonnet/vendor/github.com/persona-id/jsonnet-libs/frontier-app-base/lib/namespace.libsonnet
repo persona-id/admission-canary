@@ -19,5 +19,9 @@ local namespace = (import 'libs.libsonnet').k.core.v1.namespace;
       // its Cloud SQL / Workload Identity shape checks to opted-in apps only, so
       // every other Frontier namespace's IAM and SQL objects stay unaffected.
       if cfg.mysql.enabled then { 'frontier.withpersona.com/mysql-database': 'true' } else {}
-    )),
+    ))
+    // Argo CD's CreateNamespace makes the namespace without labels. Labelling it
+    // a wave ahead of the Config Connector objects gives the policy's namespace
+    // cache time to see the opt-in before they are admitted.
+    + (if cfg.mysql.enabled then namespace.metadata.withAnnotations({ 'argocd.argoproj.io/sync-wave': '-1' }) else {}),
 }

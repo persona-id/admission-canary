@@ -15,7 +15,7 @@ local h = import 'helpers.libsonnet';
         annotations: {
           'argocd.argoproj.io/hook': 'Sync',
           'argocd.argoproj.io/hook-delete-policy': 'BeforeHookCreation,HookSucceeded',
-          'argocd.argoproj.io/sync-wave': '1',
+          'argocd.argoproj.io/sync-wave': '2',
         },
         labels: h.labels(cfg) {
           'app.kubernetes.io/component': 'mysql-migration',

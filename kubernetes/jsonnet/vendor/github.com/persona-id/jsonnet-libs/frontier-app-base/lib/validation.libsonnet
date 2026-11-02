@@ -15,6 +15,7 @@ function(cfg)
   local auth = cfg.auth;
   local bg = cfg.backgroundJobs;
   local queue = cfg.jobQueue;
+  local mysqlInstance = h.mysqlInstanceSettings(cfg);
   local identOk(name) =
     std.isString(name) && std.length(name) > 0 && std.length(name) <= 63 &&
     std.member('abcdefghijklmnopqrstuvwxyz', std.substr(name, 0, 1)) &&
@@ -22,19 +23,32 @@ function(cfg)
   local reservedDbs = ['mysql', 'information_schema', 'performance_schema', 'sys'];
   local mysqlDbs = if std.isArray(cfg.mysql.databases) then cfg.mysql.databases else [];
   local mysqlDbNames = [h.get(db, 'name', '') for db in mysqlDbs];
+  // A MySQL database name: identOk's characters plus underscore.
+  local dbNameOk(name) =
+    std.isString(name) && std.length(name) > 0 && std.length(name) <= 63 &&
+    std.member('abcdefghijklmnopqrstuvwxyz', std.substr(name, 0, 1)) &&
+    std.member('abcdefghijklmnopqrstuvwxyz0123456789', std.substr(name, std.length(name) - 1, 1)) &&
+    std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-_', c) for c in std.stringChars(name)]);
+  local appDb = h.mysqlAppDatabase(cfg);
+  local mysqlDbObjectNames = [h.mysqlDatabaseObjectName(n) for n in [appDb] + mysqlDbNames if std.isString(n)];
   local mysqlDbErrors =
     (if std.isArray(cfg.mysql.databases) then [] else ['mysql.databases must be a list.'])
+    + (if cfg.mysql.enabled && (!dbNameOk(appDb) || std.member(reservedDbs, appDb)) then
+         ['mysql.databaseName "%s" must be a lowercase name of letters, digits, dashes and underscores, and not a MySQL system database.' % appDb]
+       else [])
     + std.flatMap(function(db)
       local name = h.get(db, 'name', '');
       local collation = h.get(db, 'collation', cfg.mysql.collation);
-      (if !identOk(name) || std.member(reservedDbs, name) || name == cfg.appName then
+      (if !dbNameOk(name) || std.member(reservedDbs, name) || name == appDb then
          ['mysql.databases name "%s" must be a lowercase name, not the app database, and not a MySQL system database.' % name]
        else [])
       + (if !std.member(['utf8mb4_0900_ai_ci', 'utf8mb4_unicode_ci'], collation) then
            ['mysql.databases collation for "%s" must be utf8mb4_0900_ai_ci or utf8mb4_unicode_ci.' % name]
          else [])
-    , mysqlDbs)
-    + (if std.length(std.set(mysqlDbNames)) != std.length(mysqlDbNames) then ['mysql.databases names must be unique.'] else []);
+                  , mysqlDbs)
+    + (if std.length(std.set(mysqlDbObjectNames)) != std.length(mysqlDbObjectNames) then
+         ['mysql.databases names must be unique, counting "_" and "-" as the same.']
+       else []);
   local mysqlUsers = if std.isArray(cfg.mysql.users) then cfg.mysql.users else [];
   local mysqlAccount = h.mysqlAccountId(cfg);
   local emailOk(email) =
@@ -53,11 +67,92 @@ function(cfg)
       + (if !std.member(['CLOUD_IAM_USER', 'CLOUD_IAM_SERVICE_ACCOUNT', 'CLOUD_IAM_GROUP'], type) then
            ['mysql.users type for "%s" must be CLOUD_IAM_USER, CLOUD_IAM_SERVICE_ACCOUNT or CLOUD_IAM_GROUP.' % name]
          else [])
-      + (if !emailOk(email) || (type == 'CLOUD_IAM_SERVICE_ACCOUNT' && !std.endsWith(email, '.iam.gserviceaccount.com')) then
-           ['mysql.users email for "%s" must be an email address, and a service account email must end in .iam.gserviceaccount.com.' % name]
+      + (if !emailOk(email) ||
+            (type == 'CLOUD_IAM_SERVICE_ACCOUNT' && !std.endsWith(email, '@' + h.mysqlProjectId(cfg) + '.iam.gserviceaccount.com')) ||
+            (type != 'CLOUD_IAM_SERVICE_ACCOUNT' && !std.endsWith(email, '@withpersona.com')) then
+           ['mysql.users email for "%s" must be @withpersona.com, or a service account in %s.' % [name, h.mysqlProjectId(cfg)]]
          else [])
-    , mysqlUsers)
+      + (
+        local privileges = h.mysqlUserPrivileges(user);
+        if !std.isArray(privileges) || privileges == [] ||
+           !std.all([std.member(h.mysqlUserPrivilegeNames, p) for p in privileges]) ||
+           (std.member(privileges, 'ALL PRIVILEGES') && std.length(privileges) > 1) then
+          ['mysql.users privileges for "%s" must be ["ALL PRIVILEGES"] or a list of %s.'
+           % [name, std.join(', ', [p for p in h.mysqlUserPrivilegeNames if p != 'ALL PRIVILEGES'])]]
+        else []
+      )
+      + (
+        local databases = h.mysqlUserDatabases(cfg, user);
+        if !std.isArray(databases) || databases == [] ||
+           !std.all([std.member(h.mysqlDatabaseNames(cfg), db) for db in databases]) then
+          ['mysql.users databases for "%s" must list databases on this instance: %s.' % [name, std.join(', ', h.mysqlDatabaseNames(cfg))]]
+        else []
+      )
+                  , mysqlUsers)
     + (if std.length(std.set(mysqlUserNames)) != std.length(mysqlUserNames) then ['mysql.users names must be unique.'] else []);
+  local mysqlConnections = h.mysqlConnections(cfg);
+  local mysqlConnectionNames = [h.get(c, 'name', '') for c in mysqlConnections];
+  local grantErrors(kind, entry) =
+    local name = h.get(entry, 'name', '');
+    local privileges = h.mysqlUserPrivileges(entry);
+    local databases = h.mysqlUserDatabases(cfg, entry);
+    (if !std.isArray(privileges) || privileges == [] ||
+        !std.all([std.member(h.mysqlUserPrivilegeNames, p) for p in privileges]) ||
+        (std.member(privileges, 'ALL PRIVILEGES') && std.length(privileges) > 1) then
+       ['%s privileges for "%s" must be ["ALL PRIVILEGES"] or a list of %s.'
+        % [kind, name, std.join(', ', [p for p in h.mysqlUserPrivilegeNames if p != 'ALL PRIVILEGES'])]]
+     else [])
+    + (if !std.isArray(databases) || databases == [] ||
+          !std.all([std.member(h.mysqlDatabaseNames(cfg), db) for db in databases]) then
+         ['%s databases for "%s" must list databases on this instance: %s.' % [kind, name, std.join(', ', h.mysqlDatabaseNames(cfg))]]
+       else []);
+  local mysqlConnectionErrors =
+    (if std.isArray(cfg.mysql.connections) then [] else ['mysql.connections must be a list.'])
+    + std.flatMap(function(c)
+      local name = h.get(c, 'name', '');
+      (if !std.isString(name) || name == '' || !std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789', ch) for ch in std.stringChars(name)]) ||
+          std.member(['dev', 'prod'], name) then
+         ['mysql.connections name "%s" must be lowercase letters and digits, and not dev or prod.' % name]
+       else if std.length(h.mysqlAccountIdFor(cfg, c)) > 30 then
+         ['mysql.connections name "%s" is too long: %s must fit 30 characters.' % [name, h.mysqlAccountIdFor(cfg, c)]]
+       else [])
+      + grantErrors('mysql.connections', c)
+                  , mysqlConnections)
+    + (if std.length(std.set(mysqlConnectionNames)) != std.length(mysqlConnectionNames) then ['mysql.connections names must be unique.'] else [])
+    + [
+      'mysql.users name "%s" is the name of a mysql.connections identity.' % u
+      for u in std.setInter(std.set(mysqlUserNames), std.set([h.mysqlAccountIdFor(cfg, c) for c in mysqlConnections if std.isString(h.get(c, 'name', ''))]))
+    ];
+  // Flag name => whether a value is allowed. These are the flags stack-core's
+  // Cloud SQL databases set; Cloud SQL checks the exact ranges.
+  local digits(v) = std.length(v) > 0 && std.all([std.member('0123456789', ch) for ch in std.stringChars(v)]);
+  local number(v) = std.length(v) > 0 && std.all([std.member('0123456789.', ch) for ch in std.stringChars(v)]) && std.count(std.stringChars(v), '.') <= 1;
+  local onOff(v) = std.member(['on', 'off'], v);
+  local mysqlFlagValues = {
+    binlog_row_image: function(v) std.member(['full', 'minimal', 'noblob'], v),
+    innodb_autoinc_lock_mode: function(v) std.member(['0', '1', '2'], v),
+    innodb_cloudsql_managed_buffer_pool: onOff,
+    innodb_cloudsql_managed_buffer_pool_threshold_pct: function(v) digits(v) && std.parseInt(v) >= 50 && std.parseInt(v) <= 99,
+    log_bin_trust_function_creators: onOff,
+    log_output: function(v) std.member(['FILE', 'TABLE', 'NONE'], v),
+    long_query_time: number,
+    performance_schema: onOff,
+    performance_schema_max_thread_instances: digits,
+    slow_query_log: onOff,
+    table_open_cache_instances: function(v) digits(v) && std.parseInt(v) >= 1 && std.parseInt(v) <= 64,
+  };
+  local mysqlFlags = if std.isArray(cfg.mysql.instance.databaseFlags) then cfg.mysql.instance.databaseFlags else [];
+  local mysqlFlagErrors =
+    (if std.isArray(cfg.mysql.instance.databaseFlags) then [] else ['mysql.instance.databaseFlags must be a list.'])
+    + [
+      local name = h.get(f, 'name', '');
+      local value = h.get(f, 'value', '');
+      'mysql.instance.databaseFlags "%s" must be one of %s, with a valid string value.' % [name, std.join(', ', std.objectFields(mysqlFlagValues))]
+      for f in mysqlFlags
+      if !std.objectHas(mysqlFlagValues, h.get(f, 'name', '')) || !std.isString(h.get(f, 'value', '')) || !mysqlFlagValues[f.name](f.value)
+    ]
+    + (local names = [h.get(f, 'name', '') for f in mysqlFlags];
+       if std.length(std.set(names)) != std.length(names) then ['mysql.instance.databaseFlags names must be unique.'] else []);
   local names = [h.normalize(h.get(w, 'name', '')) for w in bg.workers + bg.scheduled];
   local duplicates = std.set([n for n in names if std.count(names, n) > 1]);
   local restrictsIdentities = auth.allow.emails != [] || auth.allow.groups != [];
@@ -67,16 +162,16 @@ function(cfg)
   local checkRoute(i, r) =
     local name = 'routes[%d]' % i;
     local humans = h.get(r, 'humans', '');
-    local forgeName(p) = std.substr(p, std.length('forge/'), std.length(p));
-    local isForge(p) = std.startsWith(p, 'forge/') && forgeName(p) != '' && std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-', c) for c in std.stringChars(forgeName(p))]);
-    local isPrincipal(p) = isForge(p) || (std.startsWith(p, 'spiffe://') && std.length(p) > std.length('spiffe://'));
+    local forge(p) = h.forgePrincipal(cfg, p);
+    local isForge(p) = forge(p) != null && h.isForgeName(forge(p).name) && h.isForgeName(forge(p).environment);
+    local isPrincipal(p) = isForge(p) || (std.isString(p) && std.startsWith(p, 'spiffe://') && std.length(p) > std.length('spiffe://'));
     (if h.get(r, 'paths', []) == [] then ['%s needs paths.' % name] else [])
     + (if !std.member(['none', 'anyone', 'okta'], humans) then ['%s.humans must be none, anyone or okta.' % name] else [])
     + (if (h.get(r, 'groups', []) != [] || h.get(r, 'emails', []) != []) && humans != 'okta'
        then ['%s sets groups or emails, which only apply with humans: okta.' % name] else [])
     + (if std.objectHas(r, 'apps') then ['%s.apps is now frontierApps.' % name] else [])
     + [
-      '%s.principals entry "%s" must be forge/<forge-app> or start with spiffe://.' % [name, p]
+      '%s.principals entry "%s" must be %s (optionally @<environment>) or start with spiffe://.' % [name, p, std.join(', ', ['%s/<forge-app>' % prefix for prefix in std.objectFields(cfg.forgeIdentity.issuers)])]
       for p in h.get(r, 'principals', [])
       if !isPrincipal(p)
     ]
@@ -94,9 +189,27 @@ function(cfg)
        && (std.isString(cfg[key][handler].port) || cfg[key][handler].port != cfg.service.port)
   ];
   local delegatedCallers = std.get(cfg, 'delegatedCallers', []);
+  // Delegation is trusted only from the Internal Apps signer, under its name or its alias.
   local isForgeCaller(c) =
-    std.isString(c) && std.startsWith(c, 'forge/') && std.length(c) > std.length('forge/')
-    && std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-', ch) for ch in std.stringChars(std.substr(c, std.length('forge/'), std.length(c)))]);
+    local f = h.forgePrincipal(cfg, c);
+    f != null && f.prefix == 'forge-internal' && h.isForgeName(f.name) && h.isForgeName(f.environment);
+  // Two prefixes sharing an issuer would admit each other's apps.
+  local issuers = cfg.forgeIdentity.issuers;
+  local issuerErrors = [
+    'forgeIdentity.issuers key "%s" must be lowercase letters, digits and hyphens, with an https issuer and a jwks.' % prefix
+    for prefix in std.objectFields(issuers)
+    if prefix == '' || !std.all([std.member('abcdefghijklmnopqrstuvwxyz0123456789-', c) for c in std.stringChars(prefix)])
+       || !std.startsWith(h.get(issuers[prefix], 'issuer', ''), 'https://') || h.get(issuers[prefix], 'jwks', '') == ''
+  ] + (
+    local urls = [issuers[prefix].issuer for prefix in std.objectFields(issuers)];
+    if std.length(std.set(urls)) != std.length(urls) then ['forgeIdentity.issuers must each have their own issuer.'] else []
+  ) + (
+    if h.delegatedCallers(cfg) != [] && !std.objectHas(issuers, 'forge-internal') then ['delegatedCallers needs the forge-internal issuer in forgeIdentity.issuers.'] else []
+  ) + [
+    'forgeIdentity.aliases key "%s" must name an issuer key and must not be one itself.' % alias
+    for alias in std.objectFields(std.get(cfg.forgeIdentity, 'aliases', {}))
+    if std.objectHas(issuers, alias) || !std.objectHas(issuers, cfg.forgeIdentity.aliases[alias])
+  ];
   local routeErrors = std.flatMap(function(i) checkRoute(i, cfg.routes[i]), std.range(0, std.length(cfg.routes) - 1));
 
   {
@@ -119,10 +232,11 @@ function(cfg)
 
     assert cfg.routes == [] || !usesAuth :
            'routes replaces auth.required, auth.unauthedPaths, auth.authedPaths and auth.allow; set one or the other.',
+    assert issuerErrors == [] : issuerErrors[0],
     assert routeErrors == [] : routeErrors[0],
-    assert std.isArray(delegatedCallers) : 'delegatedCallers must be a list of forge/<clientId> entries.',
+    assert std.isArray(delegatedCallers) : 'delegatedCallers must be a list of forge-internal/<forge-app> entries.',
     assert !std.isArray(delegatedCallers) || std.all([isForgeCaller(c) for c in delegatedCallers]) :
-           'delegatedCallers entries must be forge/<clientId> (lowercase letters, digits and hyphens).',
+           'delegatedCallers entries must be forge-internal/<forge-app>, optionally @<environment> (lowercase letters, digits and hyphens).',
 
     // The deprecated `auth` keys, checked only when `routes` does not replace them.
     assert cfg.routes != [] || !(auth.unauthedPaths != [] && auth.authedPaths != []) :
@@ -152,11 +266,11 @@ function(cfg)
            'mysql.migration.enabled needs mysql.migration.command.',
     assert !std.objectHas(cfg.mysql.instance, 'profile') :
            'mysql.instance.profile has been replaced by tier and availabilityType.',
-    assert std.member(['db-g1-small', 'db-custom-1-3840', 'db-custom-2-7680', 'db-custom-4-15360'], cfg.mysql.instance.tier) :
-           'mysql.instance.tier must be db-g1-small, db-custom-1-3840, db-custom-2-7680 or db-custom-4-15360, not "%s".' % cfg.mysql.instance.tier,
-    assert std.member(['ZONAL', 'REGIONAL'], cfg.mysql.instance.availabilityType) :
-           'mysql.instance.availabilityType must be ZONAL or REGIONAL, not "%s".' % cfg.mysql.instance.availabilityType,
-    assert cfg.mysql.instance.tier != 'db-g1-small' || cfg.mysql.instance.availabilityType == 'ZONAL' :
+    assert std.member(['db-g1-small', 'db-custom-1-3840', 'db-custom-2-7680', 'db-custom-4-15360'], mysqlInstance.tier) :
+           'mysql.instance.tier must be db-g1-small, db-custom-1-3840, db-custom-2-7680 or db-custom-4-15360, not "%s".' % mysqlInstance.tier,
+    assert std.member(['ZONAL', 'REGIONAL'], mysqlInstance.availabilityType) :
+           'mysql.instance.availabilityType must be ZONAL or REGIONAL, not "%s".' % mysqlInstance.availabilityType,
+    assert mysqlInstance.tier != 'db-g1-small' || mysqlInstance.availabilityType == 'ZONAL' :
            'mysql.instance.tier db-g1-small cannot be REGIONAL. Raise the tier before turning on high availability.',
     assert std.isNumber(cfg.mysql.instance.diskSize) && std.floor(cfg.mysql.instance.diskSize) == cfg.mysql.instance.diskSize && cfg.mysql.instance.diskSize >= 10 && cfg.mysql.instance.diskSize <= 100 :
            'mysql.instance.diskSize must be a whole number of GB from 10 to 100, not %s.' % cfg.mysql.instance.diskSize,
@@ -168,8 +282,21 @@ function(cfg)
            'mysql.instance.deletionPolicy must be abandon or delete, not "%s".' % cfg.mysql.instance.deletionPolicy,
     assert !cfg.mysql.enabled || (std.startsWith(cfg.namespace, 'frontier-') && std.length(cfg.namespace) <= 35) :
            'mysql.enabled requires a frontier-* namespace of at most 35 characters so the generated service account id fits.',
-    assert !cfg.mysql.enabled || cfg.mysql.region != '' :
-           'mysql.region is required when mysql.enabled is true.',
+    // An older config may still set mysql.projectId: harmless when it matches.
+    assert h.get(cfg.mysql, 'projectId', '') == '' || cfg.mysql.projectId == h.mysqlProjectId(cfg) :
+           'mysql.projectId "%s" is not this cluster\'s project, %s. Remove mysql.projectId: the cluster sets the project.'
+           % [cfg.mysql.projectId, h.mysqlProjectId(cfg)],
+    assert h.get(cfg.mysql, 'region', h.mysqlRegion) == h.mysqlRegion :
+           'mysql.region is always %s on Frontier. Remove mysql.region.' % h.mysqlRegion,
+    assert std.member(['', h.mysqlPrivateNetwork(cfg)], h.get(cfg.mysql, 'privateNetwork', '')) :
+           'mysql.privateNetwork is always %s on Frontier. Remove mysql.privateNetwork.' % h.mysqlPrivateNetwork(cfg),
+    assert !std.objectHas(cfg.mysql.proxy, 'maxSigtermDelay') :
+           'mysql.proxy.maxSigtermDelay is now mysql.proxy.shutdownDelaySeconds, a number of seconds.',
+    assert std.isNumber(cfg.mysql.proxy.shutdownDelaySeconds) && std.floor(cfg.mysql.proxy.shutdownDelaySeconds) == cfg.mysql.proxy.shutdownDelaySeconds &&
+           cfg.mysql.proxy.shutdownDelaySeconds >= 0 && cfg.mysql.proxy.shutdownDelaySeconds <= 3600 :
+           'mysql.proxy.shutdownDelaySeconds must be a whole number of seconds from 0 to 3600.',
+    assert std.member(['MYSQL_8_0', 'MYSQL_8_4'], cfg.mysql.version) :
+           'mysql.version must be MYSQL_8_0 or MYSQL_8_4, not "%s".' % cfg.mysql.version,
     assert !cfg.mysql.enabled || std.length(std.split(cfg.permissions.owner, '.')) <= h.mysqlOwnerLabelCount :
            'permissions.owner "%s" has more than %d dot-separated parts; Cloud SQL labels cannot store a dotted username in one value.'
            % [cfg.permissions.owner, h.mysqlOwnerLabelCount],
@@ -177,6 +304,8 @@ function(cfg)
            'mysql.databases and mysql.users must be lists.',
     assert mysqlDbErrors == [] : mysqlDbErrors[0],
     assert mysqlUserErrors == [] : mysqlUserErrors[0],
+    assert mysqlConnectionErrors == [] : mysqlConnectionErrors[0],
+    assert mysqlFlagErrors == [] : mysqlFlagErrors[0],
 
     assert !queue.enabled || h.get(queue, 'client', '') == '' || std.objectHas(h.queueClientVars, queue.client) :
            'jobQueue.client "%s" is not one of sidekiq, bullmq and asynq.' % queue.client,

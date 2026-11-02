@@ -116,13 +116,14 @@ local previewConfig(config, prNumber) =
     local oktaAllowlist = h.oktaAllowlist(cfg);
     local instances = h.valkeyInstances(cfg);
     local delegated = h.delegatedCallers(cfg) != [];
-    local forgeUsed = delegated || std.any([std.startsWith(p, 'forge/') for r in h.routes(cfg) for p in r.principals]);
+    local forgeUsed = delegated || std.any([h.forgePrincipal(cfg, p) != null for r in h.routes(cfg) for p in r.principals]);
     local migrate = cfg.mysql.enabled && cfg.mysql.migration.enabled;
-    // The grant runs in wave 0. A migration follows in wave 1; otherwise app
-    // workloads can start in wave 1 as soon as the grant has succeeded.
+    // Config Connector resources run in wave 0, then grants in wave 1 and an
+    // optional migration in wave 2. This makes an invalid database fail before
+    // the grants hook can retry, and workloads only start after setup succeeds.
     local afterMysqlSetup =
       if cfg.mysql.enabled
-      then { metadata+: { annotations+: { 'argocd.argoproj.io/sync-wave': if migrate then '2' else '1' } } }
+      then { metadata+: { annotations+: { 'argocd.argoproj.io/sync-wave': if migrate then '3' else '2' } } }
       else {};
 
     validation(cfg) + {

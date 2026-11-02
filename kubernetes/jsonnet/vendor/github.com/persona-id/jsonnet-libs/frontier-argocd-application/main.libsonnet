@@ -88,7 +88,14 @@ local newApplication(name, namespace, project, repoURL, path, targetRevision, au
       + application.spec.syncPolicy.automated.withSelfHeal(true)
     else {}
   )
-  + application.spec.syncPolicy.withSyncOptions(['CreateNamespace=true']);
+  + application.spec.syncPolicy.withSyncOptions(['CreateNamespace=true'])
+  // A failed sync otherwise waits for the next commit. Retrying covers what
+  // settles on its own: a namespace label the cluster hasn't cached yet, a
+  // Cloud SQL maintenance window, a Config Connector object still reconciling.
+  + application.spec.syncPolicy.retry.withLimit(5)
+  + application.spec.syncPolicy.retry.backoff.withDuration('10s')
+  + application.spec.syncPolicy.retry.backoff.withFactor(2)
+  + application.spec.syncPolicy.retry.backoff.withMaxDuration('3m');
 
 {
   // The argo-cd-libsonnet Application builders, for patching what `newFrontierApp`
@@ -111,7 +118,13 @@ local newApplication(name, namespace, project, repoURL, path, targetRevision, au
   // The Application is in the app's own project, frontier-<repository> (see
   // `newProject`), so the namespace has to be frontier-<repository>-dev or
   // frontier-<repository>-prod. Anything else fails here rather than at sync.
-  newFrontierApp(env, config, repoURL, targetRevision, autoSync=true)::
+  //
+  // `gcpProject` is the GCP project of the cluster this renders on. The
+  // cluster's Argo CD passes it to kubernetes/deploy as a top-level argument;
+  // forwarded here, it reaches main.jsonnet as the gcpProject top-level argument,
+  // which frontier-app-base's managed MySQL needs. Empty passes nothing, so a
+  // main.jsonnet that doesn't take gcpProject keeps rendering.
+  newFrontierApp(env, config, repoURL, targetRevision, autoSync=true, gcpProject='')::
     local releaseName = std.get(config, 'releaseName', '');
     local name = if releaseName != '' then releaseName else std.get(config, 'appName', '');
     assert name != '' : 'config needs a releaseName or appName; it names the Application';
@@ -132,7 +145,10 @@ local newApplication(name, namespace, project, repoURL, path, targetRevision, au
     + source.directory.jsonnet.withLibs(['kubernetes/jsonnet/vendor'])
     // ArgoCD substitutes $ARGOCD_APP_REVISION with the commit sha targetRevision
     // resolved to, which the image has to be pushed under.
-    + source.directory.jsonnet.withTlas([{ name: 'imageTag', value: '$ARGOCD_APP_REVISION' }]),
+    + source.directory.jsonnet.withTlas(
+      [{ name: 'imageTag', value: '$ARGOCD_APP_REVISION' }]
+      + (if gcpProject != '' then [{ name: 'gcpProject', value: gcpProject }] else [])
+    ),
 
   // The AppProject for the app registered in frontier-app-registry with `repoURL`,
   // named frontier-<repository>. It only lets the app's Applications deploy that

@@ -7,6 +7,7 @@ local sanitizer = |||
   function envoy_on_request(handle)
     local headers = handle:headers()
     headers:remove("x-forge-caller")
+    headers:remove("x-forge-issuer")
     headers:remove("x-forge-user-email")
     headers:remove("x-forge-user-groups")
     -- Preserve browser oauth2-proxy identity. Forge passes must

@@ -1,0 +1,246 @@
+[
+   {
+      "apiVersion": "v1",
+      "data": {
+         "database": "billing_production",
+         "instanceConnectionName": "persona-frontier:us-central1:frontier-billing-prod",
+         "user": "app-billing-prod"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mysql-connection"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLDatabase",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "billing-production"
+      },
+      "spec": {
+         "charset": "utf8mb4",
+         "collation": "utf8mb4_unicode_ci",
+         "instanceRef": {
+            "name": "frontier-billing-prod"
+         },
+         "resourceID": "billing_production"
+      }
+   },
+   {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "Sync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            "argocd.argoproj.io/sync-wave": "1"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-mysql-grants"
+      },
+      "spec": {
+         "activeDeadlineSeconds": 360,
+         "backoffLimit": 0,
+         "template": {
+            "metadata": {
+               "labels": {
+                  "app.kubernetes.io/instance": "billing-prod",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-mysql-provisioner"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "args": [
+                        "set -eu\ni=0\nwhile [ \"$i\" -lt 30 ]; do\n  if mysql --connect-timeout=10 --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute=\"$MYSQL_GRANTS\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
+                     ],
+                     "command": [
+                        "/bin/sh",
+                        "-c"
+                     ],
+                     "env": [
+                        {
+                           "name": "MYSQL_GRANTS",
+                           "value": "DROP USER IF EXISTS 'root'@'%'; GRANT ALL PRIVILEGES ON `billing_production`.* TO 'app-billing-prod'@'%'; REVOKE IF EXISTS ALL PRIVILEGES ON `billing_production`.* FROM 'app-billing-prod-ro'@'%'; REVOKE IF EXISTS GRANT OPTION ON `billing_production`.* FROM 'app-billing-prod-ro'@'%'; GRANT SELECT ON `billing_production`.* TO 'app-billing-prod-ro'@'%';"
+                        },
+                        {
+                           "name": "MYSQL_PWD",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "password",
+                                 "name": "app-billing-prod-mysql-provisioner"
+                              }
+                           }
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b",
+                     "name": "grant",
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false
+                     }
+                  }
+               ],
+               "initContainers": [
+                  {
+                     "args": [
+                        "--health-check",
+                        "--http-address=0.0.0.0",
+                        "--http-port=9091",
+                        "--private-ip",
+                        "--port=3306",
+                        "persona-frontier:us-central1:frontier-billing-prod"
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
+                     "name": "cloud-sql-proxy",
+                     "restartPolicy": "Always",
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "runAsNonRoot": true
+                     },
+                     "startupProbe": {
+                        "failureThreshold": 300,
+                        "httpGet": {
+                           "path": "/startup",
+                           "port": 9091
+                        },
+                        "periodSeconds": 1
+                     }
+                  }
+               ],
+               "restartPolicy": "Never",
+               "serviceAccountName": "cloud-sql-proxy"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLInstance",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "production",
+            "owner_0": "owner",
+            "owner_1": "none",
+            "owner_2": "none",
+            "owner_3": "none",
+            "owner_4": "none",
+            "owner_5": "none"
+         },
+         "name": "frontier-billing-prod"
+      },
+      "spec": {
+         "databaseVersion": "MYSQL_8_0",
+         "region": "us-central1",
+         "resourceID": "frontier-billing-prod",
+         "settings": {
+            "activationPolicy": "ALWAYS",
+            "availabilityType": "REGIONAL",
+            "backupConfiguration": {
+               "backupRetentionSettings": {
+                  "retainedBackups": 7,
+                  "retentionUnit": "COUNT"
+               },
+               "binaryLogEnabled": true,
+               "enabled": true,
+               "startTime": "14:00",
+               "transactionLogRetentionDays": 7
+            },
+            "databaseFlags": [
+               {
+                  "name": "cloudsql_iam_authentication",
+                  "value": "on"
+               },
+               {
+                  "name": "binlog_row_image",
+                  "value": "minimal"
+               },
+               {
+                  "name": "innodb_autoinc_lock_mode",
+                  "value": "2"
+               },
+               {
+                  "name": "innodb_cloudsql_managed_buffer_pool",
+                  "value": "on"
+               },
+               {
+                  "name": "innodb_cloudsql_managed_buffer_pool_threshold_pct",
+                  "value": "90"
+               },
+               {
+                  "name": "log_bin_trust_function_creators",
+                  "value": "on"
+               },
+               {
+                  "name": "log_output",
+                  "value": "FILE"
+               },
+               {
+                  "name": "long_query_time",
+                  "value": "2"
+               },
+               {
+                  "name": "performance_schema",
+                  "value": "on"
+               },
+               {
+                  "name": "performance_schema_max_thread_instances",
+                  "value": "2048"
+               },
+               {
+                  "name": "slow_query_log",
+                  "value": "on"
+               },
+               {
+                  "name": "table_open_cache_instances",
+                  "value": "4"
+               }
+            ],
+            "deletionProtectionEnabled": true,
+            "diskAutoresize": true,
+            "diskAutoresizeLimit": 100,
+            "diskSize": 100,
+            "diskType": "PD_SSD",
+            "edition": "ENTERPRISE",
+            "ipConfiguration": {
+               "ipv4Enabled": false,
+               "privateNetworkRef": {
+                  "external": "projects/persona-frontier/global/networks/default"
+               },
+               "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+            },
+            "maintenanceWindow": {
+               "day": 2,
+               "hour": 4
+            },
+            "pricingPlan": "PER_USE",
+            "tier": "db-custom-2-7680"
+         }
+      }
+   }
+]

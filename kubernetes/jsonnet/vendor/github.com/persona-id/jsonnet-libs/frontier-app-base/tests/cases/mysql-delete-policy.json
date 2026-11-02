@@ -1,0 +1,120 @@
+[
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLDatabase",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "canary-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "canary-prod"
+      },
+      "spec": {
+         "charset": "utf8mb4",
+         "collation": "utf8mb4_0900_ai_ci",
+         "instanceRef": {
+            "name": "frontier-canary-prod"
+         },
+         "resourceID": "canary-prod"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLDatabase",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "canary-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "audit"
+      },
+      "spec": {
+         "charset": "utf8mb4",
+         "collation": "utf8mb4_0900_ai_ci",
+         "instanceRef": {
+            "name": "frontier-canary-prod"
+         },
+         "resourceID": "audit"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLInstance",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "canary-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "production",
+            "owner_0": "owner",
+            "owner_1": "none",
+            "owner_2": "none",
+            "owner_3": "none",
+            "owner_4": "none",
+            "owner_5": "none"
+         },
+         "name": "frontier-canary-prod"
+      },
+      "spec": {
+         "databaseVersion": "MYSQL_8_0",
+         "region": "us-central1",
+         "resourceID": "frontier-canary-prod",
+         "settings": {
+            "activationPolicy": "ALWAYS",
+            "availabilityType": "ZONAL",
+            "backupConfiguration": {
+               "backupRetentionSettings": {
+                  "retainedBackups": 7,
+                  "retentionUnit": "COUNT"
+               },
+               "binaryLogEnabled": true,
+               "enabled": true,
+               "startTime": "14:00",
+               "transactionLogRetentionDays": 7
+            },
+            "databaseFlags": [
+               {
+                  "name": "cloudsql_iam_authentication",
+                  "value": "on"
+               },
+               {
+                  "name": "performance_schema",
+                  "value": "off"
+               }
+            ],
+            "deletionProtectionEnabled": false,
+            "diskAutoresize": true,
+            "diskAutoresizeLimit": 100,
+            "diskSize": 10,
+            "diskType": "PD_SSD",
+            "edition": "ENTERPRISE",
+            "ipConfiguration": {
+               "ipv4Enabled": false,
+               "privateNetworkRef": {
+                  "external": "projects/persona-frontier/global/networks/default"
+               },
+               "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+            },
+            "maintenanceWindow": {
+               "day": 2,
+               "hour": 4
+            },
+            "pricingPlan": "PER_USE",
+            "tier": "db-custom-1-3840"
+         }
+      }
+   }
+]
