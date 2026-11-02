@@ -1,0 +1,1275 @@
+[
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "allow-intra-namespace"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "namespaces": [
+                           "frontier-billing-prod"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-s2s"
+      },
+      "spec": {
+         "action": "ALLOW",
+         "rules": [
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "paths": [
+                           "/metrics",
+                           "/healthz"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
+                           "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
+                        ],
+                        "principals": [
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-internal",
+                           "cluster.local/ns/istio-gateways/sa/istio-ingressgateway-external"
+                        ]
+                     }
+                  }
+               ],
+               "to": [
+                  {
+                     "operation": {
+                        "notPaths": [
+                           "/metrics",
+                           "/healthz"
+                        ],
+                        "paths": [
+                           "/*"
+                        ]
+                     }
+                  }
+               ]
+            },
+            {
+               "from": [
+                  {
+                     "source": {
+                        "principals": [
+                           "cluster.local/ns/knative-serving/sa/activator",
+                           "cluster.local/ns/knative-serving/sa/controller"
+                        ]
+                     }
+                  }
+               ]
+            }
+         ],
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "data": {
+         "database": "billing-prod",
+         "instanceConnectionName": "persona-frontier:us-central1:frontier-billing-prod",
+         "user": "app-billing-prod"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mysql-connection"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicy",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-ro-workload-identity"
+      },
+      "spec": {
+         "bindings": [
+            {
+               "members": [
+                  "serviceAccount:persona-frontier.svc.id.goog[frontier-billing-prod/cloud-sql-proxy-ro]"
+               ],
+               "role": "roles/iam.workloadIdentityUser"
+            }
+         ],
+         "resourceRef": {
+            "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+            "kind": "IAMServiceAccount",
+            "name": "app-billing-prod-ro"
+         }
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/owner_0": "owner",
+            "frontier.withpersona.com/owner_1": "none",
+            "frontier.withpersona.com/owner_2": "none",
+            "frontier.withpersona.com/owner_3": "none",
+            "frontier.withpersona.com/owner_4": "none",
+            "frontier.withpersona.com/owner_5": "none"
+         },
+         "name": "cloud-sql-proxy-ro"
+      },
+      "spec": {
+         "replicas": 2,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+            }
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "frontier.withpersona.com/mysql-connection-name": "persona-frontier:us-central1:frontier-billing-prod"
+               },
+               "labels": {
+                  "app.kubernetes.io/instance": "billing-prod",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+               }
+            },
+            "spec": {
+               "affinity": {
+                  "podAntiAffinity": {
+                     "preferredDuringSchedulingIgnoredDuringExecution": [
+                        {
+                           "podAffinityTerm": {
+                              "labelSelector": {
+                                 "matchLabels": {
+                                    "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+                                 }
+                              },
+                              "topologyKey": "kubernetes.io/hostname"
+                           },
+                           "weight": 100
+                        }
+                     ]
+                  }
+               },
+               "containers": [
+                  {
+                     "args": [
+                        "--auto-iam-authn",
+                        "--address=0.0.0.0",
+                        "--health-check",
+                        "--http-address=0.0.0.0",
+                        "--http-port=9091",
+                        "--max-sigterm-delay=290s",
+                        "--private-ip",
+                        "--structured-logs",
+                        "--port=3306",
+                        "$(INSTANCE_CONNECTION_NAME)"
+                     ],
+                     "env": [
+                        {
+                           "name": "INSTANCE_CONNECTION_NAME",
+                           "valueFrom": {
+                              "configMapKeyRef": {
+                                 "key": "instanceConnectionName",
+                                 "name": "mysql-connection"
+                              }
+                           }
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
+                     "livenessProbe": {
+                        "httpGet": {
+                           "path": "/liveness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "name": "cloud-sql-proxy",
+                     "readinessProbe": {
+                        "httpGet": {
+                           "path": "/readiness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "resources": {
+                        "limits": {
+                           "cpu": "160m",
+                           "memory": "64Mi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "32Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "runAsNonRoot": true
+                     },
+                     "startupProbe": {
+                        "failureThreshold": 30,
+                        "httpGet": {
+                           "path": "/startup",
+                           "port": 9091
+                        },
+                        "periodSeconds": 1,
+                        "timeoutSeconds": 5
+                     }
+                  }
+               ],
+               "serviceAccountName": "cloud-sql-proxy-ro",
+               "terminationGracePeriodSeconds": 305
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-ro"
+      },
+      "spec": {
+         "maxUnavailable": 1,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-ro-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-ro"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "tcp-mysql",
+               "port": 3306,
+               "targetPort": 3306
+            }
+         ],
+         "selector": {
+            "frontier.withpersona.com/workload": "cloud-sql-proxy-ro"
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+         "annotations": {
+            "iam.gke.io/gcp-service-account": "app-billing-prod-ro@persona-frontier.iam.gserviceaccount.com"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-ro"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMServiceAccount",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-ro"
+      },
+      "spec": {
+         "displayName": "Frontier billing-prod MySQL ro",
+         "resourceID": "app-billing-prod-ro"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLUser",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-ro"
+      },
+      "spec": {
+         "instanceRef": {
+            "name": "frontier-billing-prod"
+         },
+         "resourceID": "app-billing-prod-ro@persona-frontier.iam.gserviceaccount.com",
+         "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLDatabase",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "billing-prod"
+      },
+      "spec": {
+         "charset": "utf8mb4",
+         "collation": "utf8mb4_0900_ai_ci",
+         "instanceRef": {
+            "name": "frontier-billing-prod"
+         },
+         "resourceID": "billing-prod"
+      }
+   },
+   {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "Sync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            "argocd.argoproj.io/sync-wave": "1"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-mysql-grants"
+      },
+      "spec": {
+         "activeDeadlineSeconds": 360,
+         "backoffLimit": 0,
+         "template": {
+            "metadata": {
+               "labels": {
+                  "app.kubernetes.io/instance": "billing-prod",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-mysql-provisioner"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "args": [
+                        "set -eu\ni=0\nwhile [ \"$i\" -lt 30 ]; do\n  if mysql --connect-timeout=10 --protocol=TCP --skip-ssl --host=127.0.0.1 --user=mysql-provisioner --execute=\"$MYSQL_GRANTS\"; then\n    exit 0\n  fi\n  i=$((i + 1))\n  sleep 10\ndone\nexit 1\n"
+                     ],
+                     "command": [
+                        "/bin/sh",
+                        "-c"
+                     ],
+                     "env": [
+                        {
+                           "name": "MYSQL_GRANTS",
+                           "value": "DROP USER IF EXISTS 'root'@'%'; GRANT ALL PRIVILEGES ON `billing-prod`.* TO 'app-billing-prod'@'%'; REVOKE IF EXISTS ALL PRIVILEGES ON `billing-prod`.* FROM 'app-billing-prod-ro'@'%'; REVOKE IF EXISTS GRANT OPTION ON `billing-prod`.* FROM 'app-billing-prod-ro'@'%'; GRANT SELECT ON `billing-prod`.* TO 'app-billing-prod-ro'@'%';"
+                        },
+                        {
+                           "name": "MYSQL_PWD",
+                           "valueFrom": {
+                              "secretKeyRef": {
+                                 "key": "password",
+                                 "name": "app-billing-prod-mysql-provisioner"
+                              }
+                           }
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b",
+                     "name": "grant",
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false
+                     }
+                  }
+               ],
+               "initContainers": [
+                  {
+                     "args": [
+                        "--health-check",
+                        "--http-address=0.0.0.0",
+                        "--http-port=9091",
+                        "--private-ip",
+                        "--port=3306",
+                        "persona-frontier:us-central1:frontier-billing-prod"
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
+                     "name": "cloud-sql-proxy",
+                     "restartPolicy": "Always",
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "runAsNonRoot": true
+                     },
+                     "startupProbe": {
+                        "failureThreshold": 300,
+                        "httpGet": {
+                           "path": "/startup",
+                           "port": 9091
+                        },
+                        "periodSeconds": 1
+                     }
+                  }
+               ],
+               "restartPolicy": "Never",
+               "serviceAccountName": "cloud-sql-proxy"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMPolicy",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-workload-identity"
+      },
+      "spec": {
+         "bindings": [
+            {
+               "members": [
+                  "serviceAccount:persona-frontier.svc.id.goog[frontier-billing-prod/cloud-sql-proxy]"
+               ],
+               "role": "roles/iam.workloadIdentityUser"
+            }
+         ],
+         "resourceRef": {
+            "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+            "kind": "IAMServiceAccount",
+            "name": "app-billing-prod"
+         }
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLInstance",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "production",
+            "owner_0": "owner",
+            "owner_1": "none",
+            "owner_2": "none",
+            "owner_3": "none",
+            "owner_4": "none",
+            "owner_5": "none"
+         },
+         "name": "frontier-billing-prod"
+      },
+      "spec": {
+         "databaseVersion": "MYSQL_8_0",
+         "region": "us-central1",
+         "resourceID": "frontier-billing-prod",
+         "settings": {
+            "activationPolicy": "ALWAYS",
+            "availabilityType": "ZONAL",
+            "backupConfiguration": {
+               "backupRetentionSettings": {
+                  "retainedBackups": 7,
+                  "retentionUnit": "COUNT"
+               },
+               "binaryLogEnabled": true,
+               "enabled": true,
+               "startTime": "14:00",
+               "transactionLogRetentionDays": 7
+            },
+            "databaseFlags": [
+               {
+                  "name": "cloudsql_iam_authentication",
+                  "value": "on"
+               },
+               {
+                  "name": "performance_schema",
+                  "value": "off"
+               },
+               {
+                  "name": "innodb_cloudsql_managed_buffer_pool",
+                  "value": "on"
+               },
+               {
+                  "name": "innodb_cloudsql_managed_buffer_pool_threshold_pct",
+                  "value": "90"
+               }
+            ],
+            "deletionProtectionEnabled": true,
+            "diskAutoresize": true,
+            "diskAutoresizeLimit": 100,
+            "diskSize": 10,
+            "diskType": "PD_SSD",
+            "edition": "ENTERPRISE",
+            "ipConfiguration": {
+               "ipv4Enabled": false,
+               "privateNetworkRef": {
+                  "external": "projects/persona-frontier/global/networks/default"
+               },
+               "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+            },
+            "maintenanceWindow": {
+               "day": 2,
+               "hour": 4
+            },
+            "pricingPlan": "PER_USE",
+            "tier": "db-custom-1-3840"
+         }
+      }
+   },
+   {
+      "apiVersion": "batch/v1",
+      "kind": "Job",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "PreSync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-mysql-secret"
+      },
+      "spec": {
+         "backoffLimit": 6,
+         "template": {
+            "spec": {
+               "containers": [
+                  {
+                     "args": [
+                        "set -eu\napi=\"https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}\"\ntoken=\"$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\"\nca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\nexport SSL_CERT_FILE=\"${ca}\"\nauth=\"Authorization: Bearer ${token}\"\nsecret_url=\"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets/${SECRET_NAME}\"\nif wget -q --header=\"${auth}\" -O /dev/null \"${secret_url}\"; then\n  exit 0\nfi\npassword=\"$(head -c 48 /dev/urandom | base64 | tr -d '\\n' | head -c 48)\"\nencoded_password=\"$(printf %s \"${password}\" | base64 | tr -d '\\n')\"\nbody=\"$(printf '{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"%s\",\"namespace\":\"%s\"},\"type\":\"Opaque\",\"data\":{\"password\":\"%s\"}}' \"${SECRET_NAME}\" \"${SECRET_NAMESPACE}\" \"${encoded_password}\")\"\nwget -q --header=\"${auth}\" --header=\"Content-Type: application/json\" --post-data=\"${body}\" -O /dev/null \"${api}/api/v1/namespaces/${SECRET_NAMESPACE}/secrets\"\n"
+                     ],
+                     "command": [
+                        "/bin/sh",
+                        "-c"
+                     ],
+                     "env": [
+                        {
+                           "name": "SECRET_NAME",
+                           "value": "app-billing-prod-mysql-provisioner"
+                        },
+                        {
+                           "name": "SECRET_NAMESPACE",
+                           "value": "frontier-billing-prod"
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/alpine/mysql@sha256:08770743847a0fa8a79d79287ec07ba8cacb7ec2ea4fdaec7d97c8a51c57682b",
+                     "name": "generate",
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false
+                     }
+                  }
+               ],
+               "restartPolicy": "Never",
+               "serviceAccountName": "mysql-secret-generator"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLUser",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod-mysql-provisioner"
+      },
+      "spec": {
+         "host": "%",
+         "instanceRef": {
+            "name": "frontier-billing-prod"
+         },
+         "password": {
+            "valueFrom": {
+               "secretKeyRef": {
+                  "key": "password",
+                  "name": "app-billing-prod-mysql-provisioner"
+               }
+            }
+         },
+         "resourceID": "mysql-provisioner"
+      }
+   },
+   {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "frontier.withpersona.com/owner_0": "owner",
+            "frontier.withpersona.com/owner_1": "none",
+            "frontier.withpersona.com/owner_2": "none",
+            "frontier.withpersona.com/owner_3": "none",
+            "frontier.withpersona.com/owner_4": "none",
+            "frontier.withpersona.com/owner_5": "none"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "replicas": 2,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
+            }
+         },
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "frontier.withpersona.com/mysql-connection-name": "persona-frontier:us-central1:frontier-billing-prod"
+               },
+               "labels": {
+                  "app.kubernetes.io/instance": "billing-prod",
+                  "app.kubernetes.io/managed-by": "tanka",
+                  "app.kubernetes.io/name": "frontier-app-base",
+                  "frontier.withpersona.com/workload": "cloud-sql-proxy"
+               }
+            },
+            "spec": {
+               "affinity": {
+                  "podAntiAffinity": {
+                     "preferredDuringSchedulingIgnoredDuringExecution": [
+                        {
+                           "podAffinityTerm": {
+                              "labelSelector": {
+                                 "matchLabels": {
+                                    "frontier.withpersona.com/workload": "cloud-sql-proxy"
+                                 }
+                              },
+                              "topologyKey": "kubernetes.io/hostname"
+                           },
+                           "weight": 100
+                        }
+                     ]
+                  }
+               },
+               "containers": [
+                  {
+                     "args": [
+                        "--auto-iam-authn",
+                        "--address=0.0.0.0",
+                        "--health-check",
+                        "--http-address=0.0.0.0",
+                        "--http-port=9091",
+                        "--max-sigterm-delay=290s",
+                        "--private-ip",
+                        "--structured-logs",
+                        "--port=3306",
+                        "$(INSTANCE_CONNECTION_NAME)"
+                     ],
+                     "env": [
+                        {
+                           "name": "INSTANCE_CONNECTION_NAME",
+                           "valueFrom": {
+                              "configMapKeyRef": {
+                                 "key": "instanceConnectionName",
+                                 "name": "mysql-connection"
+                              }
+                           }
+                        }
+                     ],
+                     "image": "us-central1-docker.pkg.dev/persona-container-registry/mirror/cloud-sql-connectors/cloud-sql-proxy@sha256:ef8786bd894cf1746b432f9eb9e4cb6b50c48629eed75789734f3a7b8df7de28",
+                     "livenessProbe": {
+                        "httpGet": {
+                           "path": "/liveness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "name": "cloud-sql-proxy",
+                     "readinessProbe": {
+                        "httpGet": {
+                           "path": "/readiness",
+                           "port": 9091
+                        },
+                        "periodSeconds": 10,
+                        "timeoutSeconds": 5
+                     },
+                     "resources": {
+                        "limits": {
+                           "cpu": "160m",
+                           "memory": "64Mi"
+                        },
+                        "requests": {
+                           "cpu": "100m",
+                           "memory": "32Mi"
+                        }
+                     },
+                     "securityContext": {
+                        "allowPrivilegeEscalation": false,
+                        "runAsNonRoot": true
+                     },
+                     "startupProbe": {
+                        "failureThreshold": 30,
+                        "httpGet": {
+                           "path": "/startup",
+                           "port": 9091
+                        },
+                        "periodSeconds": 1,
+                        "timeoutSeconds": 5
+                     }
+                  }
+               ],
+               "serviceAccountName": "cloud-sql-proxy",
+               "terminationGracePeriodSeconds": 305
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "policy/v1",
+      "kind": "PodDisruptionBudget",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "maxUnavailable": 1,
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "frontier.withpersona.com/workload": "cloud-sql-proxy"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      },
+      "spec": {
+         "ports": [
+            {
+               "name": "tcp-mysql",
+               "port": 3306,
+               "targetPort": 3306
+            }
+         ],
+         "selector": {
+            "frontier.withpersona.com/workload": "cloud-sql-proxy"
+         }
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+         "annotations": {
+            "iam.gke.io/gcp-service-account": "app-billing-prod@persona-frontier.iam.gserviceaccount.com"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "cloud-sql-proxy"
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "PreSync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            "argocd.argoproj.io/sync-wave": "-1"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mysql-secret-generator"
+      },
+      "rules": [
+         {
+            "apiGroups": [
+               ""
+            ],
+            "resources": [
+               "secrets"
+            ],
+            "verbs": [
+               "create"
+            ]
+         },
+         {
+            "apiGroups": [
+               ""
+            ],
+            "resourceNames": [
+               "app-billing-prod-mysql-provisioner"
+            ],
+            "resources": [
+               "secrets"
+            ],
+            "verbs": [
+               "get"
+            ]
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "PreSync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            "argocd.argoproj.io/sync-wave": "-1"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mysql-secret-generator"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "Role",
+         "name": "mysql-secret-generator"
+      },
+      "subjects": [
+         {
+            "kind": "ServiceAccount",
+            "name": "mysql-secret-generator",
+            "namespace": "frontier-billing-prod"
+         }
+      ]
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/hook": "PreSync",
+            "argocd.argoproj.io/hook-delete-policy": "BeforeHookCreation,HookSucceeded",
+            "argocd.argoproj.io/sync-wave": "-1"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "mysql-secret-generator"
+      }
+   },
+   {
+      "apiVersion": "iam.cnrm.cloud.google.com/v1beta1",
+      "kind": "IAMServiceAccount",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod"
+      },
+      "spec": {
+         "displayName": "Frontier billing-prod MySQL",
+         "resourceID": "app-billing-prod"
+      }
+   },
+   {
+      "apiVersion": "sql.cnrm.cloud.google.com/v1beta1",
+      "kind": "SQLUser",
+      "metadata": {
+         "annotations": {
+            "cnrm.cloud.google.com/deletion-policy": "abandon",
+            "cnrm.cloud.google.com/project-id": "persona-frontier"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-billing-prod"
+      },
+      "spec": {
+         "instanceRef": {
+            "name": "frontier-billing-prod"
+         },
+         "resourceID": "app-billing-prod@persona-frontier.iam.gserviceaccount.com",
+         "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/sync-wave": "-1"
+         },
+         "labels": {
+            "app": "billing-prod",
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "environment": "development",
+            "frontier.withpersona.com/mysql-database": "true",
+            "homestead.withpersona.com/catalog": "prod",
+            "istio.io/rev": "stable",
+            "name": "frontier-billing-prod"
+         },
+         "name": "frontier-billing-prod"
+      }
+   },
+   {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app-mtls-strict"
+      },
+      "spec": {
+         "mtls": {
+            "mode": "STRICT"
+         },
+         "selector": {
+            "matchLabels": {
+               "serving.knative.dev/service": "app"
+            }
+         }
+      }
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-crd-access"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "frontier-namespace-owner"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "owner-edit"
+      },
+      "roleRef": {
+         "apiGroup": "rbac.authorization.k8s.io",
+         "kind": "ClusterRole",
+         "name": "edit"
+      },
+      "subjects": [
+         {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "User",
+            "name": "owner@withpersona.com"
+         }
+      ]
+   },
+   {
+      "apiVersion": "serving.knative.dev/v1",
+      "kind": "Service",
+      "metadata": {
+         "annotations": {
+            "argocd.argoproj.io/sync-wave": "2"
+         },
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base",
+            "knative.withpersona.com/visibility": "private"
+         },
+         "name": "app"
+      },
+      "spec": {
+         "template": {
+            "metadata": {
+               "annotations": {
+                  "autoscaling.knative.dev/minScale": "1",
+                  "autoscaling.knative.dev/target-burst-capacity": "0"
+               },
+               "labels": {
+                  "environment": "production"
+               }
+            },
+            "spec": {
+               "containers": [
+                  {
+                     "env": [
+                        {
+                           "name": "MYSQL_DATABASE",
+                           "valueFrom": {
+                              "configMapKeyRef": {
+                                 "key": "database",
+                                 "name": "mysql-connection"
+                              }
+                           }
+                        },
+                        {
+                           "name": "MYSQL_HOST",
+                           "value": "cloud-sql-proxy"
+                        },
+                        {
+                           "name": "MYSQL_PORT",
+                           "value": "3306"
+                        },
+                        {
+                           "name": "MYSQL_USER",
+                           "valueFrom": {
+                              "configMapKeyRef": {
+                                 "key": "user",
+                                 "name": "mysql-connection"
+                              }
+                           }
+                        },
+                        {
+                           "name": "MYSQL_RO_HOST",
+                           "value": "cloud-sql-proxy-ro"
+                        },
+                        {
+                           "name": "MYSQL_RO_PORT",
+                           "value": "3306"
+                        },
+                        {
+                           "name": "MYSQL_RO_USER",
+                           "value": "app-billing-prod-ro"
+                        }
+                     ],
+                     "image": ":",
+                     "ports": [
+                        {
+                           "containerPort": 8080
+                        }
+                     ]
+                  }
+               ],
+               "nodeSelector": {
+                  "cloud.google.com/compute-class": "standard"
+               },
+               "serviceAccountName": "app",
+               "timeoutSeconds": 300,
+               "tolerations": [
+                  {
+                     "effect": "NoSchedule",
+                     "key": "cloud.google.com/compute-class",
+                     "operator": "Equal",
+                     "value": "standard"
+                  }
+               ]
+            }
+         },
+         "traffic": [
+            {
+               "latestRevision": true,
+               "percent": 100
+            }
+         ]
+      }
+   },
+   {
+      "apiVersion": "v1",
+      "imagePullSecrets": [
+         {
+            "name": "ghcr-pull-secret"
+         }
+      ],
+      "kind": "ServiceAccount",
+      "metadata": {
+         "labels": {
+            "app.kubernetes.io/instance": "billing-prod",
+            "app.kubernetes.io/managed-by": "tanka",
+            "app.kubernetes.io/name": "frontier-app-base"
+         },
+         "name": "app"
+      }
+   }
+]

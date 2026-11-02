@@ -66,6 +66,9 @@ jobs:
           # and renders with a placeholder owner.
           IS_TEMPLATE: ${{ github.repository == 'persona-id/persona-template-frontier-app' }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
+          # The GCP project the cluster's Argo CD passes as gcpProject. This canary
+          # runs on the staging Frontier cluster, whose managed MySQL lives there.
+          GCP_PROJECT: persona-frontier-staging
         run: |
           set -euo pipefail
           failures=()
@@ -103,7 +106,7 @@ jobs:
             app="kubernetes/deploy/$env.jsonnet"
             tla_args=()
             if [ -f "$app" ]; then
-              if ! app_json="$(jsonnet -J kubernetes/jsonnet/vendor "$app")"; then
+              if ! app_json="$(jsonnet -J kubernetes/jsonnet/vendor --tla-str "gcpProject=$GCP_PROJECT" "$app")"; then
                 failures+=("$app does not render")
                 continue
               fi

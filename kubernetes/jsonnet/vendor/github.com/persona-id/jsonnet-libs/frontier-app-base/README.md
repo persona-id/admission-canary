@@ -128,11 +128,11 @@ MySQL is off by default. Each long-lived environment opts in separately:
 ```jsonnet
 mysql: {
   enabled: true,
-  // Both environments start here. Raise any of these later; dev and prod
-  // accept the same values.
+  version: 'MYSQL_8_0',               // or MYSQL_8_4; upgrades in place, never back
   instance: {
-    tier: 'db-g1-small',              // or db-custom-1-3840, db-custom-2-7680, db-custom-4-15360
-    availabilityType: 'ZONAL',        // REGIONAL once tier is a db-custom size
+    // Leave tier out to start dev on db-g1-small and prod on db-custom-1-3840.
+    tier: 'db-custom-2-7680',         // db-g1-small, db-custom-1-3840, db-custom-2-7680, db-custom-4-15360
+    availabilityType: 'REGIONAL',     // REGIONAL needs a db-custom tier
     diskSize: 10,                     // whole GB, 10 to 100, and only upwards
     diskAutoresizeLimit: 100,
   },
@@ -141,40 +141,153 @@ mysql: {
     { name: 'reporting', collation: 'utf8mb4_unicode_ci' },
   ],
   users: [
+    // SELECT on every database unless privileges or databases say otherwise.
     { name: 'billing-reader', type: 'CLOUD_IAM_USER', email: 'reader@withpersona.com' },
+    { name: 'etl', type: 'CLOUD_IAM_SERVICE_ACCOUNT', email: 'etl@persona-frontier.iam.gserviceaccount.com',
+      privileges: ['SELECT', 'INSERT', 'UPDATE'], databases: ['reporting'] },
   ],
 }
 ```
 
-`projectId` is chosen from the namespace: `persona-frontier` for a `-prod`
-namespace and `persona-frontier-staging` otherwise. Set it only when the
-namespace and the cluster's project disagree.
+### Project, region and network
 
-Each opted-in environment gets its own Config Connector-managed instance.
-Dev and prod use the same default: zonal `db-g1-small`, 10 GB, growing to
-at most 100 GB. `db-g1-small` is a shared-core machine and cannot be highly
-available. A `db-custom-*` tier can be `ZONAL` or `REGIONAL`. Changing the
-tier or the availability type restarts the instance in place. Disk can grow
-and cannot shrink. The version the library creates is MySQL 8.0.
+The instance runs in the GCP project of the Frontier cluster that renders the
+app, in `us-central1`, on that project's default VPC. There is nothing to set:
+the cluster's Argo CD passes its project as the `gcpProject` top-level argument
+(see frontier-argocd-application's `newFrontierApp`), and the template's
+`main.jsonnet` copies it into the config. The same app config renders
+`persona-frontier` on frontier-us-central1 and `persona-frontier-staging` on
+frontier-staging-us-central1, for the project annotation, the Workload Identity
+pool, the private network and the connection name alike.
+
+An app can't choose the project. Without a `gcpProject` (an older
+`main.jsonnet`, or a local render) the project is `persona-frontier`. An older
+config that still sets `mysql.projectId` keeps rendering when it matches the
+cluster's project, and fails with a message to remove it otherwise. A
+`mysql.region` or `mysql.privateNetwork` that disagrees with the cluster fails
+the render too, because the cluster's admission policy would reject it anyway.
+
+### Instance
+
+Each opted-in environment gets its own Config Connector-managed instance. An
+empty `instance.tier` starts dev on zonal `db-g1-small` and prod on zonal
+`db-custom-1-3840`; any tier can be set explicitly in either. Both start with
+10 GB and can grow to at most 100 GB. `db-g1-small` is a shared-core machine and
+cannot be highly available. A `db-custom-*` tier can be `ZONAL` or `REGIONAL`.
+Changing the tier or the availability type restarts the instance in place. Disk
+can grow and cannot shrink.
 
 `instance.deletionPolicy` defaults to `abandon`: deleting the app's
-Kubernetes objects leaves the Cloud SQL instance, database, users and IAM
+Kubernetes objects leaves the Cloud SQL instance, database, app user and IAM
 objects in GCP untouched. Setting it to `delete` actually deletes them, in
 both dev and prod, with no final backup.
 
 The library creates the Cloud SQL instance, the database named after the
 app, any extra `databases`, the app IAM user, any extra `users`, and the
-Workload Identity binding in the app namespace. Extra users are IAM users,
-service accounts or groups. A password user is not accepted, because Cloud
-SQL makes those superusers. Only the `cloud-sql-proxy` ServiceAccount is
-annotated with the app's Google service account; app pods connect to its
-Service on port 3306. The proxy waits 30 seconds after SIGTERM before
-closing. A preview gets none of these resources.
+Workload Identity binding in the app namespace. Only the `cloud-sql-proxy`
+ServiceAccount is annotated with the app's Google service account; app pods
+connect to its Service, `MYSQL_HOST:MYSQL_PORT` (`cloud-sql-proxy:3306`), as
+`MYSQL_USER` with no password. When asked to stop, the proxy keeps serving open connections for up to
+`proxy.shutdownDelaySeconds` (290) and exits as soon as they close. Each proxy
+has a disruption budget of one, and its two replicas prefer different nodes. A preview gets none of these resources.
+
+### Extra users
+
+Extra `users` are IAM users, service accounts or groups. A password user is not
+accepted, because Cloud SQL makes those superusers. Each gets `privileges`
+(default `['SELECT']`; `['ALL PRIVILEGES']` or a list of table-level privileges)
+on `databases` (default: every database on the instance). Every sync resets a
+listed user to exactly those grants, so narrowing them takes effect, and
+removing an entry deletes that MySQL user whatever `deletionPolicy` says.
+
+Logging in also takes `roles/cloudsql.instanceUser` and `roles/cloudsql.client`
+in the Frontier project. Both Frontier projects grant them to their own service
+accounts in persona-infrastructure, so a service account entry works as is. A
+person or group needs them granted too; until that grant lands in
+persona-infrastructure, their entry creates the MySQL user but they can't log
+in. The roles only cover connecting and IAM login, so an entry here is what
+actually gives someone data access, on this instance and these databases only.
+
+The instance has no public IP. A person connects with the Cloud SQL Auth Proxy
+from somewhere that routes to the Frontier VPC:
+
+```sh
+cloud-sql-proxy --private-ip --auto-iam-authn "$(kubectl -n <namespace> get configmap mysql-connection -o jsonpath='{.data.instanceConnectionName}')"
+mysql --host=127.0.0.1 --user=<email before the @> <database>
+```
+
+A service account whose workload already runs on the Frontier VPC needs nothing
+more.
+
+### More identities for the app
+
+`connections` gives the app more MySQL identities besides its default one, for
+example a read-only identity standing in for a replica (Frontier instances have
+none):
+
+```jsonnet
+mysql+: {
+  connections: [{ name: 'ro' }],   // privileges and databases default as for users: SELECT on every database
+}
+```
+
+Each entry gets its own Google service account, `app-<namespace without
+frontier->-<name>`, its own IAM database user and its own `cloud-sql-proxy-<name>`
+Deployment and Service, because the proxy logs in as the pod's identity. Every
+app pod gets `MYSQL_<NAME>_HOST`, `MYSQL_<NAME>_PORT` and `MYSQL_<NAME>_USER`
+next to the default `MYSQL_*`. Like `users`, each sync resets its grants to
+exactly `privileges` on `databases`. A name is lowercase letters and digits, not
+`dev` or `prod`, and short enough for the account id to fit 30 characters; the
+admission policy checks the same shape, so a connection can't claim another
+namespace's account.
+
+### Database flags
+
+`instance.databaseFlags` adds MySQL flags to `cloudsql_iam_authentication`,
+which is always on. `performance_schema` defaults to `off` (for the shared-core
+tier) unless set here. The accepted names are the ones stack-core's Cloud SQL
+databases use: `binlog_row_image`, `innodb_autoinc_lock_mode`,
+`innodb_cloudsql_managed_buffer_pool`,
+`innodb_cloudsql_managed_buffer_pool_threshold_pct`,
+`log_bin_trust_function_creators`, `log_output`, `long_query_time`,
+`performance_schema`, `performance_schema_max_thread_instances`,
+`slow_query_log` and `table_open_cache_instances`.
+
+```jsonnet
+instance+: {
+  databaseFlags: [
+    { name: 'innodb_cloudsql_managed_buffer_pool', value: 'on' },
+    { name: 'innodb_cloudsql_managed_buffer_pool_threshold_pct', value: '90' },
+  ],
+}
+```
+
+### Database name
+
+The app's own database is named after `appName` unless `databaseName` says
+otherwise, e.g. a Rails app's existing `persona-billing_production`. MySQL names
+may use underscores; the `SQLDatabase` object is named with dashes and keeps
+the real name in `resourceID`, so two names that differ only in `_` and `-` are
+rejected. `MYSQL_DATABASE` and the grants use the real name.
+
+### Sync order
 
 `mysql.enabled` also labels the app namespace
 `frontier.withpersona.com/mysql-database: "true"`. The cluster's Frontier
 MySQL admission policy reads that label to scope its Cloud SQL / Workload
-Identity shape checks to opted-in namespaces only.
+Identity shape checks to opted-in namespaces only. The Namespace syncs in wave
+-1, ahead of the Config Connector objects in wave 0, so the label is in place
+before they are admitted; `newFrontierApp`'s sync retry covers a cache that is
+still behind.
+
+### Names
+
+The app's Google service account is `app-<namespace without frontier->`, which
+has to fit Cloud IAM's 30 characters, so a MySQL namespace can be at most 35
+characters: an app name of at most 21. The admission policy derives the same
+name to check that one namespace can't take over another's service account, and
+can't verify a hashed or truncated name, so a longer app has to be renamed
+before it can enable MySQL.
 
 ## Configuration
 
@@ -191,10 +304,41 @@ VPN; `public`; or `none`, for no hostname, reachable only from other apps at
 checked top to bottom, the first route whose paths match wins, and a path no route
 matches is refused. Each route sets `paths`, `humans` (`none`, `anyone` or `okta`,
 optionally narrowed by `groups` and `emails`), and the apps that may call it, as
-`frontierApps` namespaces or `principals` (`forge/<forge-app>` or a `spiffe://` identity). On a `humans: okta`
+`frontierApps` namespaces or `principals` (`forge-internal/<forge-app>`, `forge-external/<forge-app>` or a `spiffe://` identity). On a `humans: okta`
 route, those callers skip the Okta login and everyone else still gets it. A Forge app reaches only the
 routes that name it, and `humans` rules never admit one. See
 [`config.libsonnet`](config.libsonnet) and the chart's README for the details.
+
+### Forge principals and issuers
+
+A Forge principal is `<prefix>/<forge-app>`, and each prefix names the identity service
+that signs its passes (`forgeIdentity.issuers`). `forge-internal/` is the Internal Apps
+Cloudflare account; `forge-external/` is the External Apps account, signed by
+persona-frontier-gateway's deployment there. `forge/` is a deprecated alias for
+`forge-internal/` (`forgeIdentity.aliases`), kept so existing routes keep rendering
+until they move; listing both forms of one app admits it once.
+
+`<forge-app>` is the app, its repo, which Forge's deploy stamps on the Worker's binding
+along with the environment it deployed to (`staging`, `preview` or `production`).
+persona-frontier-gateway signs them into the pass as `sub` (the app, the same in every
+environment) and `forge_environment`. `<prefix>/<forge-app>` admits the app's
+production Worker; `<prefix>/<forge-app>@<environment>` admits another, e.g.
+`forge-external/persona-dashboard-onboard@staging`. A route admits a principal only with a
+pass from that prefix's issuer whose `sub` is the app and whose `forge_environment` is the
+environment, so a Worker in one account can never pass as one with the same name in the
+other, and a staging or preview Worker never passes as production. A pass without
+`forge_environment`, from a binding deployed before the stamp or from the retired
+forge-identity signer, matches no Forge rule.
+
+The app receives the pass's `sub` in `x-forge-caller` (and `forge_app` in `x-forge-app`),
+its environment in `x-forge-environment` and its `iss` in `x-forge-issuer`. A route that
+admits both prefixes must check the issuer, since the same name can exist in each account,
+and one that admits several environments must check the environment. The Forge
+VirtualService removes every identity header a caller sends (the `x-forge-*` headers and
+the `x-auth-request-*` ones oauth2-proxy sets for people), as the chart does, so a Forge
+caller can't pass itself off as a signed-in person. Trust these headers only on a route
+that admits nothing but Forge principals. A
+principal with an unknown prefix fails the render.
 
 The `auth` keys are deprecated: when `routes` is empty they are read as the equivalent
 routes, and setting both fails the render. `scaling.minScale` is raised to at least 1,
@@ -202,7 +346,9 @@ since a request through Knative's activator hides who is calling.
 
 ### Forge apps acting for a person
 
-`delegatedCallers` (default `[]`, off) lists Forge apps, as `forge/<forge-app>`, that may
+`delegatedCallers` (default `[]`, off) lists Forge apps, as `forge-internal/<forge-app>`
+(Internal Apps only; `forge-external/` is refused, and the deprecated `forge/` still
+works), that may
 act for a person on the app's `humans: okta` and `humans: anyone` routes, never on
 `humans: none`. It is separate from `principals`: it admits no service calls, and
 `principals` admits no people. The twin of the chart's `delegatedCallers`
@@ -226,19 +372,20 @@ and with an allowlist match the route's `emails` or a `forge_user_groups` entry 
 must use the in-cluster name through the Forge listener; the hostnames still go
 through Okta.
 
-The app receives `x-forge-caller` (`sub`), `x-forge-user-email` (`forge_user_email`)
-and `x-forge-user-groups` (`forge_user_groups_csv`). The Forge VirtualService removes
-those three and the six `x-auth-request-*` identity headers a caller sends, and an
-EnvoyFilter, `app-forge-header-sanitizer`, clears the three Forge headers first on
+The app receives `x-forge-caller` (`sub`), `x-forge-issuer` (`iss`), `x-forge-user-email`
+(`forge_user_email`) and `x-forge-user-groups` (`forge_user_groups_csv`), beside
+`x-forge-app` and `x-forge-environment`. The Forge VirtualService removes those six and
+the six `x-auth-request-*` identity headers a caller sends, and an EnvoyFilter, `app-forge-header-sanitizer`, clears the four Forge
+headers first on
 every inbound request to the app's sidecar (and the `x-auth-request-*` headers when a
 pass is present), so a caller cannot set them. Browser requests keep oauth2-proxy's
 headers.
 
-The trust boundary is the identity service (`forgeIdentity.issuer`): it validates
+The trust boundary is the identity service (`forgeIdentity.issuers.forge`): it validates
 the claims' syntax, types and bounds before signing. An Istio AuthorizationPolicy
 can only match claim values and cannot validate their shape.
 
-Listing `forge/persona-cf-app-oracle` labels the Knative Service (not its revisions)
+Listing `forge-internal/persona-cf-app-oracle` (or `forge/persona-cf-app-oracle`) labels the Knative Service (not its revisions)
 `frontier.withpersona.com/oracle-access: "true"`. The label is for discovery only and
 grants nothing.
 
@@ -333,9 +480,6 @@ Options that stand in for things Helm provided:
 - **The bootstrap chart is folded in.** The Namespace and RoleBindings it had kro create
   are rendered here, from the same `permissions` and `homestead` values. The cluster's
   environment, which kro took from its own config, is `clusterEnvironment`.
-- **The Forge VirtualService removes identity headers only with `delegatedCallers`.**
-  The chart removes them on every app with a Forge route; here an app without the
-  opt-in renders exactly as before.
 - The chart's `NOTES.txt`, including its warning when the deprecated `auth` keys are
   set, has no equivalent.
 

@@ -46,6 +46,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -92,6 +93,12 @@
                ],
                "when": [
                   {
+                     "key": "request.auth.claims[forge_environment]",
+                     "values": [
+                        "production"
+                     ]
+                  },
+                  {
                      "key": "request.auth.claims[forge_delegated]",
                      "values": [
                         "true"
@@ -134,6 +141,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -176,6 +184,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -243,6 +252,12 @@
                ],
                "when": [
                   {
+                     "key": "request.auth.claims[forge_environment]",
+                     "values": [
+                        "production"
+                     ]
+                  },
+                  {
                      "key": "request.auth.claims[forge_delegated]",
                      "values": [
                         "true"
@@ -292,6 +307,12 @@
                ],
                "when": [
                   {
+                     "key": "request.auth.claims[forge_environment]",
+                     "values": [
+                        "production"
+                     ]
+                  },
+                  {
                      "key": "request.auth.claims[forge_delegated]",
                      "values": [
                         "true"
@@ -316,6 +337,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -376,6 +398,12 @@
                   }
                ],
                "when": [
+                  {
+                     "key": "request.auth.claims[forge_environment]",
+                     "values": [
+                        "production"
+                     ]
+                  },
                   {
                      "key": "request.auth.claims[forge_delegated]",
                      "values": [
@@ -442,7 +470,7 @@
                      "typed_config": {
                         "@type": "type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua",
                         "defaultSourceCode": {
-                           "inlineString": "function envoy_on_request(handle)\n  local headers = handle:headers()\n  headers:remove(\"x-forge-caller\")\n  headers:remove(\"x-forge-user-email\")\n  headers:remove(\"x-forge-user-groups\")\n  -- Preserve browser oauth2-proxy identity. Forge passes must\n  -- never carry an independent caller-supplied Okta identity.\n  if headers:get(\"x-forge-identity\") ~= nil then\n    headers:remove(\"x-auth-request-user\")\n    headers:remove(\"x-auth-request-email\")\n    headers:remove(\"x-auth-request-groups\")\n    headers:remove(\"x-auth-request-preferred-username\")\n    headers:remove(\"x-auth-request-access-token\")\n    headers:remove(\"x-auth-request-redirect\")\n  end\nend\n"
+                           "inlineString": "function envoy_on_request(handle)\n  local headers = handle:headers()\n  headers:remove(\"x-forge-caller\")\n  headers:remove(\"x-forge-issuer\")\n  headers:remove(\"x-forge-user-email\")\n  headers:remove(\"x-forge-user-groups\")\n  -- Preserve browser oauth2-proxy identity. Forge passes must\n  -- never carry an independent caller-supplied Okta identity.\n  if headers:get(\"x-forge-identity\") ~= nil then\n    headers:remove(\"x-auth-request-user\")\n    headers:remove(\"x-auth-request-email\")\n    headers:remove(\"x-auth-request-groups\")\n    headers:remove(\"x-auth-request-preferred-username\")\n    headers:remove(\"x-auth-request-access-token\")\n    headers:remove(\"x-auth-request-redirect\")\n  end\nend\n"
                         }
                      }
                   }
@@ -479,12 +507,63 @@
                      "name": "x-forge-identity"
                   }
                ],
-               "issuer": "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev",
-               "jwks": "{\"keys\":[{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"persona-cf-app-forge-identity.UaiwbHC9ncPRNLvyu7xqkgaaShz-JFDynppBLQwWtUE\",\"kty\":\"EC\",\"use\":\"sig\",\"x\":\"IXebg7TgZyIOYe-FXmcDbYSDmKMDijZVVPoitcWAp3U\",\"y\":\"Lrhm0qqB0BJ2YYBg9zim1bjeG85Wy4y0lRymToMpPYo\"}]}",
+               "issuer": "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev",
+               "jwks": "{\"keys\":[{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"persona-frontier-gateway-external.QFUIJisQDc23fJkd_T599rbDOm70lbNvYb9oPPzaiDA\",\"kty\":\"EC\",\"use\":\"sig\",\"x\":\"hT5LyLfenHCjRK1opo8zE7jYU_OQXQbPRAYP1tDvoI8\",\"y\":\"JE4WN-I7kvqcLIA5q3RON-DCbdXXt_NUKUuNk8WZILc\"}]}",
                "outputClaimToHeaders": [
                   {
                      "claim": "sub",
                      "header": "x-forge-caller"
+                  },
+                  {
+                     "claim": "iss",
+                     "header": "x-forge-issuer"
+                  },
+                  {
+                     "claim": "forge_app",
+                     "header": "x-forge-app"
+                  },
+                  {
+                     "claim": "forge_environment",
+                     "header": "x-forge-environment"
+                  },
+                  {
+                     "claim": "forge_user_email",
+                     "header": "x-forge-user-email"
+                  },
+                  {
+                     "claim": "forge_user_groups_csv",
+                     "header": "x-forge-user-groups"
+                  }
+               ]
+            },
+            {
+               "audiences": [
+                  "demo-prod"
+               ],
+               "forwardOriginalToken": false,
+               "fromHeaders": [
+                  {
+                     "name": "x-forge-identity"
+                  }
+               ],
+               "issuer": "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev",
+               "jwks": "{\"keys\":[{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"persona-cf-app-forge-identity.UaiwbHC9ncPRNLvyu7xqkgaaShz-JFDynppBLQwWtUE\",\"kty\":\"EC\",\"use\":\"sig\",\"x\":\"IXebg7TgZyIOYe-FXmcDbYSDmKMDijZVVPoitcWAp3U\",\"y\":\"Lrhm0qqB0BJ2YYBg9zim1bjeG85Wy4y0lRymToMpPYo\"},{\"alg\":\"ES256\",\"crv\":\"P-256\",\"kid\":\"persona-frontier-gateway.6OUt_f2LTk0af6ibV7dI8ymbjKbsg9_teFfzxQVP94M\",\"kty\":\"EC\",\"use\":\"sig\",\"x\":\"s1YarfkmBNSKNgVRA1qMyLnblEuNLBEmO0Qg7HJ-D1U\",\"y\":\"SjlRckaUrl8vTXdwYUKWc67N_Szr6OyHqEJZ3nEWxnk\"}]}",
+               "outputClaimToHeaders": [
+                  {
+                     "claim": "sub",
+                     "header": "x-forge-caller"
+                  },
+                  {
+                     "claim": "iss",
+                     "header": "x-forge-issuer"
+                  },
+                  {
+                     "claim": "forge_app",
+                     "header": "x-forge-app"
+                  },
+                  {
+                     "claim": "forge_environment",
+                     "header": "x-forge-environment"
                   },
                   {
                      "claim": "forge_user_email",
@@ -534,8 +613,11 @@
                         "x-auth-request-access-token",
                         "x-auth-request-redirect",
                         "x-forge-caller",
+                        "x-forge-issuer",
                         "x-forge-user-email",
-                        "x-forge-user-groups"
+                        "x-forge-user-groups",
+                        "x-forge-app",
+                        "x-forge-environment"
                      ]
                   }
                },

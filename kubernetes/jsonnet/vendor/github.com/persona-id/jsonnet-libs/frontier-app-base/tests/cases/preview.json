@@ -46,6 +46,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -71,6 +72,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -100,6 +102,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [
@@ -138,6 +141,7 @@
                   {
                      "source": {
                         "notRequestPrincipals": [
+                           "https://persona-frontier-gateway-prod.persona-identities-external-apps.workers.dev/*",
                            "https://persona-cf-app-forge-identity-prod.persona-app.workers.dev/*"
                         ],
                         "principals": [

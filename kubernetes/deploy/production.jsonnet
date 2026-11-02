@@ -8,7 +8,9 @@
 local app = import '../jsonnet/common/app.libsonnet';
 local argocd = import 'github.com/persona-id/jsonnet-libs/frontier-argocd-application/main.libsonnet';
 
-argocd.newFrontierApp(
+// gcpProject is the cluster's GCP project, passed by its Argo CD, where managed
+// MySQL runs.
+function(gcpProject='') argocd.newFrontierApp(
   'production',
   import '../jsonnet/production/config.libsonnet',
   app.repoURL,
@@ -22,4 +24,5 @@ argocd.newFrontierApp(
   // annotated tag the sha ArgoCD resolves may be the tag object's, which has no
   // image.
   targetRevision='>=0.0.0',
+  gcpProject=gcpProject,
 )

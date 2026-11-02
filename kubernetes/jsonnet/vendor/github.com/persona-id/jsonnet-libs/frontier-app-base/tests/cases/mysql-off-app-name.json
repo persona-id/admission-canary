@@ -1,0 +1,10 @@
+{
+   "apiVersion": "v1",
+   "data": {
+      "rendered": "true"
+   },
+   "kind": "ConfigMap",
+   "metadata": {
+      "name": "mysql-off-app-name-test"
+   }
+}

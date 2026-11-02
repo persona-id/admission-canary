@@ -4,9 +4,9 @@ local serviceAccount = import '../../lib/serviceaccount.libsonnet';
 local mysqlIdentityCfg = cfg {
   appName: 'mysql-identity',
   namespace: 'frontier-mysql-identity-prod',
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
   },
 };
 

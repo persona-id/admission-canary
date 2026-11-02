@@ -5,8 +5,8 @@ frontier.toList(frontier.new({
   appName: 'too-many-dots',
   namespace: 'frontier-too-many-dots-dev',
   permissions: { owner: 'a.b.c.d.e.f.g' },
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
   },
 }))

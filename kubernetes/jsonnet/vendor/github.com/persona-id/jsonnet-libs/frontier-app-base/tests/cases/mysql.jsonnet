@@ -6,9 +6,9 @@ frontier.toList(frontier.new({
   namespace: 'frontier-persona-billing-prod',
   permissions: { owner: 'owner' },
   mongo: { enabled: false },
+  gcpProject: 'persona-frontier-staging',
   mysql: {
     enabled: true,
-    projectId: 'persona-frontier-staging',
     migration: { enabled: true, command: ['bin/run-migrations'] },
   },
   backgroundJobs: {
