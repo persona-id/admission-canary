@@ -22,6 +22,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # package-proxy-auth mints an OIDC token
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,9 +38,116 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      # Installs inside the build go through the Persona Package Proxy. The token
+      # is a BuildKit secret, never a build arg; the registry URL is no secret.
+      - name: Authenticate to the package proxy
+        id: proxy
+        # Dependabot and fork PRs get no OIDC token; bin/npm-ci then installs from
+        # the public registry.
+        if: >-
+          steps.check-dockerfile.outputs.exists == 'true'
+          && github.actor != 'dependabot[bot]'
+          && github.event.pull_request.head.repo.fork != true
+        uses: persona-id/package-proxy-auth@48bb5d42c6057471f093ed3eb2cd718652530040 # v1.2.2
+
       - name: Build Docker image
         if: steps.check-dockerfile.outputs.exists == 'true'
-        run: docker build -t ${{ github.event.repository.name }}:ci .
+        env:
+          # Expected wherever the auth step runs: a lost proxy step or token then fails the build.
+          PPP_REQUIRED: ${{ github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.fork != true && '1' || '' }}
+          NPM_PROXY_REGISTRY: ${{ steps.proxy.outputs.npm-registry }}
+          IMAGE: ${{ github.event.repository.name }}:ci
+        run: |
+          # Without the auth step (Dependabot, forks) there is no token to mount.
+          secret=()
+          if [ -n "${PPP_TOKEN:-}" ]; then secret=(--secret id=ppp_token,env=PPP_TOKEN); fi
+          docker build \
+            "${secret[@]}" --build-arg PPP_REQUIRED="${PPP_REQUIRED:-}" \
+            --build-arg NPM_PROXY_REGISTRY="$NPM_PROXY_REGISTRY" \
+            --progress plain \
+            -t "$IMAGE" .
+          # Proof for the log that the image installs used the proxy.
+          echo "build used package proxy: ${NPM_PROXY_REGISTRY:-none}"
+
+  # The one job that mints a package proxy token for the packages. It installs with lifecycle
+  # scripts off, so no package code runs here, and hands node_modules on. A job with id-token
+  # has ACTIONS_ID_TOKEN_REQUEST_URL and TOKEN in every step's environment, so a job that runs
+  # dependency code must not have it: dropping the token already minted would not stop a
+  # dependency from minting another.
+  install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # package-proxy-auth mints an OIDC token
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Best-effort tripwire: fails the run if a job that holds id-token runs common build tooling
+      # or an unlisted action. First, so it fails before anything is minted.
+      - name: Check that no job with id-token runs dependency code
+        run: bash .github/scripts/check-workflow-permissions.sh
+
+      # The app's own checks. The Node version matches the Dockerfile's base image.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: npm
+
+      - name: Authenticate to the package proxy
+        id: proxy
+        # Dependabot and fork PRs get no OIDC token; bin/npm-ci then installs from
+        # the public registry.
+        if: >-
+          github.actor != 'dependabot[bot]'
+          && github.event.pull_request.head.repo.fork != true
+        uses: persona-id/package-proxy-auth@48bb5d42c6057471f093ed3eb2cd718652530040 # v1.2.2
+
+      # The public-registry fallback is for Dependabot and forks, which skip the auth step. If it ran,
+      # its credentials must have arrived, or the install would quietly bypass the proxy.
+      - name: Check that the package proxy credentials arrived
+        if: steps.proxy.outcome == 'success'
+        env:
+          NPM_PROXY_REGISTRY: ${{ steps.proxy.outputs.npm-registry }}
+        run: |
+          if [ -z "${PPP_TOKEN:-}" ] || [ -z "$NPM_PROXY_REGISTRY" ]; then
+            echo "::error::package-proxy-auth ran but PPP_TOKEN or the npm-registry output is empty"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        env:
+          NPM_PROXY_REGISTRY: ${{ steps.proxy.outputs.npm-registry }}
+        run: bin/npm-ci --ignore-scripts
+
+      # The tarball is all this job hands on, so confirm it holds no credential: PPP_TOKEN is
+      # still set here (the next step clears it) and must not appear under node_modules.
+      - name: Check that node_modules holds no package proxy token
+        run: |
+          if [ -n "${PPP_TOKEN:-}" ] && grep -rqF -e "$PPP_TOKEN" node_modules; then
+            echo "::error::node_modules contains the package proxy token"
+            exit 1
+          fi
+
+      # Nothing else in this job runs repository code, but clear the token before the tarball is
+      # built so no later step can read it.
+      - name: Drop the package proxy token
+        run: echo 'PPP_TOKEN=' >> "$GITHUB_ENV"
+
+      # A tarball, because an artifact keeps no symlinks (node_modules/.bin) or file modes.
+      - name: Pack node_modules
+        run: tar -czf "$RUNNER_TEMP/node_modules.tgz" node_modules
+
+      - name: Hand node_modules to the jobs that run dependency code
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: node-modules-${{ hashFiles('package-lock.json') }}
+          path: ${{ runner.temp }}/node_modules.tgz
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
 
   # Checks the deploy contract, then the app's typecheck and unit tests. Change
   # the app steps if you replace the app, and add your own alongside them. Do not
@@ -46,9 +156,27 @@ jobs:
   # dependency bumps unverified.
   test:
     runs-on: ubuntu-latest
+    needs: install
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A skipped job passes a required check, so a failed install must fail this job, not skip it.
+      - name: Require the jobs this one needs to have succeeded
+        env:
+          INSTALL_RESULT: ${{ needs.install.result }}
+        run: |
+          for result in "$INSTALL_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "::error::A job this one needs finished as $result"
+              exit 1
+            fi
+          done
 
       # Matches kubernetes/jsonnet/.tool-versions. Installed with the runner's Go.
       - name: Install jsonnet
@@ -157,10 +285,30 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      # The point of the split: a step that runs dependency code must not be able to mint an OIDC
+      # assertion. Prints only whether the variable is set.
+      - name: Confirm this job has no OIDC request credentials
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL: set"
+            echo "::error::this job has id-token credentials"
+            exit 1
+          fi
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL: unset"
+
+      - name: Fetch node_modules from the install job
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: node-modules-${{ hashFiles('package-lock.json') }}
+          path: ${{ runner.temp }}/node-modules
+
+      # Lifecycle scripts were skipped in the install job (--ignore-scripts). They run here, where
+      # there are no OIDC request credentials.
+      - name: Unpack node_modules and run lifecycle scripts
+        run: |
+          tar -xzf "$RUNNER_TEMP/node-modules/node_modules.tgz"
+          npm rebuild
 
       - name: Typecheck
         run: npm run typecheck

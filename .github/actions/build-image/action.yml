@@ -1,0 +1,71 @@
+name: Build and push the app image
+description: Builds the checked-out commit and pushes it to ghcr.io/<repository>:<sha>, the tag ArgoCD deploys.
+
+inputs:
+  sha:
+    description: The full commit sha being built, which the image is tagged with.
+    required: true
+  token:
+    description: A token that can push packages to ghcr.io, usually GITHUB_TOKEN.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The Application only passes the tag. The image repository comes from the
+    # name in kubernetes/jsonnet/common/app.libsonnet, so an image pushed
+    # anywhere else would deploy as an image that doesn't exist.
+    - name: Check the app name matches the repository
+      shell: bash
+      run: |
+        if ! grep -qF "name: '${GITHUB_REPOSITORY#*/}'," kubernetes/jsonnet/common/app.libsonnet; then
+          echo "::error::name in kubernetes/jsonnet/common/app.libsonnet is not ${GITHUB_REPOSITORY#*/}"
+          exit 1
+        fi
+
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    # Needs `id-token: write` on the calling job. Installs inside the image build
+    # go through the Persona Package Proxy: the token is a BuildKit secret and
+    # only the registry URL, which is not a secret, is a build arg. Every caller has a proxy
+    # binding, so a missing token fails the build; preview-image.yaml does not run for
+    # Dependabot PRs or forks, the only pull_request runs without an OIDC token.
+    - id: proxy
+      uses: persona-id/package-proxy-auth@48bb5d42c6057471f093ed3eb2cd718652530040 # v1.2.2
+
+    - name: Check that the package proxy credentials arrived
+      shell: bash
+      env:
+        NPM_PROXY_REGISTRY: ${{ steps.proxy.outputs.npm-registry }}
+      run: |
+        if [ -z "${PPP_TOKEN:-}" ] || [ -z "$NPM_PROXY_REGISTRY" ]; then
+          echo "::error::package-proxy-auth ran but PPP_TOKEN or the npm-registry output is empty"
+          exit 1
+        fi
+
+    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        push: true
+        tags: ghcr.io/${{ github.repository }}:${{ inputs.sha }}
+        # The OCI source and revision labels (see the Dockerfile).
+        build-args: |
+          SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
+          SOURCE_REVISION=${{ inputs.sha }}
+          NPM_PROXY_REGISTRY=${{ steps.proxy.outputs.npm-registry }}
+          PPP_REQUIRED=1
+        secret-envs: ppp_token=PPP_TOKEN
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # Only the build needs the token; keep it from later steps in the job.
+    - name: Drop the package proxy token
+      if: always()
+      shell: bash
+      run: echo 'PPP_TOKEN=' >> "$GITHUB_ENV"

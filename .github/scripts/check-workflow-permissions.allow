@@ -1,0 +1,3 @@
+# Jobs allowed to hold id-token: write while running steps that check-workflow-permissions.sh would
+# flag. One exact `workflow-file:job-id` per line, no wildcards. Say why next to each entry and who
+# reviewed it. Empty means the guard applies to every job.

@@ -10,7 +10,11 @@
 FROM node:26-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+ARG NPM_PROXY_REGISTRY
+COPY bin/npm-ci /usr/local/bin/npm-ci
+ARG PPP_REQUIRED
+RUN --mount=type=secret,id=ppp_token PPP_TOKEN_FILE=/run/secrets/ppp_token PPP_REQUIRED="$PPP_REQUIRED" npm-ci --ignore-scripts
+RUN npm rebuild
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
@@ -19,7 +23,11 @@ FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+ARG NPM_PROXY_REGISTRY
+COPY bin/npm-ci /usr/local/bin/npm-ci
+ARG PPP_REQUIRED
+RUN --mount=type=secret,id=ppp_token PPP_TOKEN_FILE=/run/secrets/ppp_token PPP_REQUIRED="$PPP_REQUIRED" npm-ci --ignore-scripts --omit=dev && npm cache clean --force
+RUN npm rebuild
 COPY --from=builder /app/dist ./dist
 
 # The base image's `node` user. Numeric, so Kubernetes' runAsNonRoot can verify it.

@@ -1,0 +1,64 @@
+#!/bin/sh
+# npm ci, through the Persona Package Proxy when a token is available and
+# against the public registry otherwise (laptops, generated apps, Dependabot).
+#
+# Inputs, all optional:
+#   NPM_PROXY_REGISTRY  the proxy's npm registry URL (not a secret)
+#   PPP_TOKEN           the proxy token, or
+#   PPP_TOKEN_FILE      a file holding it (a Docker BuildKit secret mount)
+#   PPP_REQUIRED       set (to anything) by CI image builds: the proxy is mandatory
+# Extra arguments go to npm ci. With neither the token nor the registry set it
+# uses the public registry, unless PPP_REQUIRED is set, which fails instead: CI
+# image builds pass it so a build path that lost its proxy step cannot go green
+# on the public registry. With exactly one of them set it fails: that is a
+# misconfigured proxy step, and a quiet fallback would bypass the proxy.
+#
+# The token reaches npm only through a 0600 user config outside the checkout
+# that holds the literal ${PPP_TOKEN}, which npm expands from its environment.
+# The registry is set through the environment because the tracked .npmrc (which
+# stays public so Dependabot keeps working) would otherwise win over a user
+# config. package-lock.json keeps its registry.npmjs.org URLs: npm's default
+# replace-registry-host rewrites them to the configured registry.
+set -eu
+
+if [ -z "${PPP_TOKEN:-}" ] && [ -n "${PPP_TOKEN_FILE:-}" ] && [ -s "$PPP_TOKEN_FILE" ]; then
+  PPP_TOKEN=$(cat "$PPP_TOKEN_FILE")
+fi
+
+if [ -n "${PPP_REQUIRED:-}" ] && { [ -z "${PPP_TOKEN:-}" ] || [ -z "${NPM_PROXY_REGISTRY:-}" ]; }; then
+  echo "npm-ci: PPP_REQUIRED is set but the package proxy token or registry is missing; refusing to install from the public registry" >&2
+  exit 1
+fi
+
+if [ -z "${PPP_TOKEN:-}" ] && [ -z "${NPM_PROXY_REGISTRY:-}" ]; then
+  echo "npm-ci: no package proxy credentials, using the registry in .npmrc" >&2
+  exec npm ci "$@"
+fi
+
+if [ -z "${PPP_TOKEN:-}" ] || [ -z "${NPM_PROXY_REGISTRY:-}" ]; then
+  echo "npm-ci: only one of the package proxy token and registry is set; refusing to fall back to the public registry" >&2
+  exit 1
+fi
+
+registry=${NPM_PROXY_REGISTRY%/}/
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+umask 077
+# shellcheck disable=SC2016 # ${PPP_TOKEN} is npm's to expand, not the shell's
+printf '//%s:_authToken=${PPP_TOKEN}\n' "${registry#*://}" > "$dir/npmrc"
+
+# While the token is in npm's environment no lifecycle script may run, whatever the caller passed: drop any
+# --ignore-scripts variant from the arguments and add the plain flag last. Scripts run in a later `npm rebuild`.
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  case $a in
+    --ignore-scripts | --ignore-scripts=* | --no-ignore-scripts) ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+set -- "$@" --ignore-scripts
+
+echo "npm-ci: installing through the package proxy at $registry" >&2
+export PPP_TOKEN
+NPM_CONFIG_USERCONFIG="$dir/npmrc" npm_config_registry="$registry" npm ci "$@"
